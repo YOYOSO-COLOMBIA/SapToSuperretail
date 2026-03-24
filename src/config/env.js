@@ -51,6 +51,9 @@ module.exports = {
     syncItemsOnly: bool(process.env.SYNC_ITEMS_ONLY, false),
     syncStockOnly: bool(process.env.SYNC_STOCK_ONLY, false),
     syncClientsOnly: bool(process.env.SYNC_CLIENTS_ONLY, false),
-    validationOnly: bool(process.env.VALIDATION_ONLY, false)
+    validationOnly: bool(process.env.VALIDATION_ONLY, false),
+    port: Number(process.env.PORT || 8080),
+    runToken: process.env.RUN_TOKEN || '',
+    autoRunOnStart: bool(process.env.AUTO_RUN_ON_START, false)
   }
 };

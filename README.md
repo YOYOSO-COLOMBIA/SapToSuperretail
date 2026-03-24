@@ -40,6 +40,9 @@ SYNC_ITEMS_ONLY=false
 SYNC_STOCK_ONLY=false
 SYNC_CLIENTS_ONLY=false
 VALIDATION_ONLY=false
+PORT=8080
+RUN_TOKEN=
+AUTO_RUN_ON_START=false
 
 # SAP B1 Service Layer
 SAP_BASE_URL=https://40.65.202.139:50000
@@ -76,6 +79,38 @@ Ejecuta:
 
 ```bash
 npm start
+```
+
+En Linux App Service, `npm start` ahora levanta un servidor HTTP minimo para mantener viva la aplicacion.
+
+## Trigger HTTP para Linux App Service
+
+Endpoints:
+
+- `GET /health`
+- `GET /status`
+- `POST /run-sync`
+
+Proteccion:
+
+- Si defines `RUN_TOKEN`, debes enviarlo en `x-run-token` o en `?token=...`
+
+Ejemplo:
+
+```bash
+curl -X POST "https://tu-app.azurewebsites.net/run-sync?token=TU_TOKEN"
+```
+
+Si quieres que el proceso corra automaticamente al iniciar el contenedor:
+
+```env
+AUTO_RUN_ON_START=true
+```
+
+Si quieres ejecutar el job una sola vez fuera del servidor HTTP:
+
+```bash
+npm run sync-once
 ```
 
 ## Pruebas parciales
