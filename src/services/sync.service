@@ -1,0 +1,186 @@
+const { loginSap } = require('./sapAuth.service');
+const { getSantaItem, getSantaClient, getSantaStock } = require('./sapData.service');
+const { executeTransaction } = require('./sql.service');
+const { upsertArticuloMaestra } = require('../repositories/santaitem.repository');
+const { upsertClienteMaestra } = require('../repositories/clientemaestra.repository');
+const { upsertStockArticulos } = require('../repositories/santastock.repository');
+const { insertLog } = require('../repositories/log.repository');
+const { app } = require('../config/env');
+
+async function tryInsertLog(tx, payload) {
+  try {
+    await insertLog(tx, payload);
+  } catch (_) {}
+}
+
+function currentProcessName() {
+  if (app.syncClientsOnly) return 'SYNC_SAP_CLIENTES_YOYOSO';
+  if (app.syncItemsOnly) return 'SYNC_SAP_ITEMS_YOYOSO';
+  if (app.syncStockOnly) return 'SYNC_SAP_STOCK_YOYOSO';
+  return 'SYNC_SAP_YOYOSO';
+}
+
+async function runSync() {
+  const fechaInicio = new Date();
+
+  try {
+    const { cookieHeader } = await loginSap();
+
+    if (app.validationOnly) {
+      const clients = await getSantaClient(cookieHeader);
+      return {
+        ok: true,
+        validationOnly: true,
+        clients: clients.length
+      };
+    }
+
+    if (app.syncClientsOnly) {
+      const clients = await getSantaClient(cookieHeader);
+      let syncResult;
+
+      await executeTransaction(async (tx) => {
+        syncResult = await upsertClienteMaestra(tx, clients);
+
+        await tryInsertLog(tx, {
+          proceso: 'SYNC_SAP_CLIENTES_YOYOSO',
+          fechaInicio,
+          fechaFin: new Date(),
+          estado: 'OK',
+          mensaje: null,
+          registrosItem: 0,
+          registrosClient: clients.length,
+          registrosStock: 0
+        });
+      });
+
+      return {
+        ok: true,
+        mode: 'clients-only',
+        clients: clients.length,
+        updated: syncResult.updated,
+        inserted: syncResult.inserted,
+        skippedInvalid: syncResult.skippedInvalid
+      };
+    }
+
+    if (app.syncItemsOnly) {
+      const items = await getSantaItem(cookieHeader);
+      let syncResult;
+
+      await executeTransaction(async (tx) => {
+        syncResult = await upsertArticuloMaestra(tx, items);
+
+        await tryInsertLog(tx, {
+          proceso: 'SYNC_SAP_ITEMS_YOYOSO',
+          fechaInicio,
+          fechaFin: new Date(),
+          estado: 'OK',
+          mensaje: null,
+          registrosItem: items.length,
+          registrosClient: 0,
+          registrosStock: 0
+        });
+      });
+
+      return {
+        ok: true,
+        mode: 'items-only',
+        items: items.length,
+        updated: syncResult.updated,
+        inserted: syncResult.inserted,
+        skippedInvalid: syncResult.skippedInvalid
+      };
+    }
+
+    if (app.syncStockOnly) {
+      const stock = await getSantaStock(cookieHeader);
+      let syncResult;
+
+      await executeTransaction(async (tx) => {
+        syncResult = await upsertStockArticulos(tx, stock);
+
+        await tryInsertLog(tx, {
+          proceso: 'SYNC_SAP_STOCK_YOYOSO',
+          fechaInicio,
+          fechaFin: new Date(),
+          estado: 'OK',
+          mensaje: null,
+          registrosItem: 0,
+          registrosClient: 0,
+          registrosStock: stock.length
+        });
+      });
+
+      return {
+        ok: true,
+        mode: 'stock-only',
+        stock: stock.length,
+        updated: syncResult.updated,
+        inserted: syncResult.inserted
+      };
+    }
+
+    const [items, clients, stock] = await Promise.all([
+      getSantaItem(cookieHeader),
+      getSantaClient(cookieHeader),
+      getSantaStock(cookieHeader)
+    ]);
+
+    let itemSyncResult;
+    let clientSyncResult;
+    let stockSyncResult;
+
+    await executeTransaction(async (tx) => {
+      itemSyncResult = await upsertArticuloMaestra(tx, items);
+      clientSyncResult = await upsertClienteMaestra(tx, clients);
+      stockSyncResult = await upsertStockArticulos(tx, stock);
+
+      await tryInsertLog(tx, {
+        proceso: 'SYNC_SAP_YOYOSO',
+        fechaInicio,
+        fechaFin: new Date(),
+        estado: 'OK',
+        mensaje: null,
+        registrosItem: items.length,
+        registrosClient: clients.length,
+        registrosStock: stock.length
+      });
+    });
+
+    return {
+      ok: true,
+      mode: 'full',
+      items: items.length,
+      clients: clients.length,
+      stock: stock.length,
+      itemsUpdated: itemSyncResult.updated,
+      itemsInserted: itemSyncResult.inserted,
+      itemsSkippedInvalid: itemSyncResult.skippedInvalid,
+      clientsUpdated: clientSyncResult.updated,
+      clientsInserted: clientSyncResult.inserted,
+      clientsSkippedInvalid: clientSyncResult.skippedInvalid,
+      stockUpdated: stockSyncResult.updated,
+      stockInserted: stockSyncResult.inserted
+    };
+  } catch (error) {
+    try {
+      await executeTransaction(async (tx) => {
+        await tryInsertLog(tx, {
+          proceso: currentProcessName(),
+          fechaInicio,
+          fechaFin: new Date(),
+          estado: 'ERROR',
+          mensaje: error.message,
+          registrosItem: 0,
+          registrosClient: 0,
+          registrosStock: 0
+        });
+      });
+    } catch (_) {}
+
+    throw error;
+  }
+}
+
+module.exports = { runSync };

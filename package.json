@@ -1,0 +1,16 @@
+{
+  "name": "sap-yoyoso-sync",
+  "version": "1.1.0",
+  "description": "Validacion SAP B1 y sincronizacion a SQL Server local",
+  "main": "src/jobs/runSync.js",
+  "scripts": {
+    "start": "node src/jobs/runSync.js",
+    "test-connection": "node src/jobs/testSqlConnection.js",
+    "test-sap": "node src/jobs/testSapConnection.js"
+  },
+  "dependencies": {
+    "axios": "^1.8.2",
+    "dotenv": "^16.4.7",
+    "mssql": "^11.0.1"
+  }
+}
