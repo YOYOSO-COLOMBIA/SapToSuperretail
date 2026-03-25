@@ -3,7 +3,6 @@ const { sap } = require('../config/env');
 const { buildHttpsAgent } = require('./sapAuth.service');
 const logger = require('../utils/logger');
 
-const PAGINATION_CONCURRENCY = 4;
 const PAGE_RETRY_LIMIT = 3;
 const RETRY_DELAY_MS = 1000;
 const PAGE_PROGRESS_INTERVAL = 10;
@@ -161,6 +160,7 @@ async function fetchParallelSkipPages(initialPage, cookieHeader, config, limits)
   let skip = config.startSkip;
   let done = false;
   let pageCount = 1;
+  const paginationConcurrency = Math.max(1, sap.paginationConcurrency || 1);
 
   while (!done) {
     if (reachedLimit(pageCount, items.length, limits)) {
@@ -174,7 +174,7 @@ async function fetchParallelSkipPages(initialPage, cookieHeader, config, limits)
     }
 
     const batchSkips = Array.from(
-      { length: PAGINATION_CONCURRENCY },
+      { length: paginationConcurrency },
       (_, index) => skip + (index * config.pageSize)
     );
 
@@ -203,10 +203,15 @@ async function fetchParallelSkipPages(initialPage, cookieHeader, config, limits)
     }
 
     if (pageCount % PAGE_PROGRESS_INTERVAL === 0 || done) {
-      logger.info('Avance SAP', { pageCount, totalItems: items.length, nextSkip: skip });
+      logger.info('Avance SAP', {
+        pageCount,
+        totalItems: items.length,
+        nextSkip: skip,
+        paginationConcurrency
+      });
     }
 
-    skip += PAGINATION_CONCURRENCY * config.pageSize;
+    skip += paginationConcurrency * config.pageSize;
   }
 
   return trimToLimit(items, limits);
@@ -219,7 +224,8 @@ async function getCollection(path, cookieHeader, limits) {
   logger.info('Primera pagina SAP recibida', {
     path,
     pageSize: firstPage.items.length,
-    hasNextPage: Boolean(firstPage.nextLink)
+    hasNextPage: Boolean(firstPage.nextLink),
+    paginationConcurrency: sap.paginationConcurrency
   });
 
   if (!parallelConfig) {

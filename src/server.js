@@ -59,6 +59,7 @@ function startRun(trigger) {
   }
 
   currentRun = executeSync(trigger);
+  currentRun.catch(() => {});
   return { started: true, running: false, promise: currentRun };
 }
 
@@ -138,4 +139,8 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   await closePool();
   server.close(() => process.exit(0));
+});
+
+process.on('unhandledRejection', (error) => {
+  logger.error('Unhandled promise rejection', error?.message || error);
 });

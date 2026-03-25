@@ -121,11 +121,9 @@ async function runSync() {
       };
     }
 
-    const [items, clients, stock] = await Promise.all([
-      getSantaItem(cookieHeader),
-      getSantaClient(cookieHeader),
-      getSantaStock(cookieHeader)
-    ]);
+    const items = await getSantaItem(cookieHeader);
+    const clients = await getSantaClient(cookieHeader);
+    const stock = await getSantaStock(cookieHeader);
 
     let itemSyncResult;
     let clientSyncResult;
