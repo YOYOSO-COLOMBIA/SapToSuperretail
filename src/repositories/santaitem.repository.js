@@ -88,8 +88,8 @@ async function upsertArticuloMaestra(tx, rows) {
   await createStageTable(tx, stageTable);
   await insertStageRows(tx, stageRows, stageTable);
 
-  const updated = await updateExistingRows(tx, target, stageTable);
-  const inserted = await insertMissingRows(tx, target, stageTable);
+  const updated = await deleteExistingRows(tx, target, stageTable);
+  const inserted = await insertStageRowsIntoTarget(tx, target, stageTable);
   await dropStageTable(tx, stageTable);
 
   return { updated, inserted, skippedInvalid: invalidRows.length };
@@ -226,23 +226,10 @@ async function insertStageRows(tx, rows, stageTable) {
   }
 }
 
-async function updateExistingRows(tx, target, stageTable) {
+async function deleteExistingRows(tx, target, stageTable) {
   const req = createRequest(tx);
   const result = await req.query(`
-    UPDATE target
-    SET
-      target.cd_ART_REFE = stage.cd_ART_REFE,
-      target.ds_ART_NOMB = stage.ds_ART_NOMB,
-      target.am_ART_VCOS = stage.am_ART_VCOS,
-      target.cd_ART_TIPO = stage.cd_ART_TIPO,
-      target.cd_ART_PREC = stage.cd_ART_PREC,
-      target.cd_IVA_CODI = stage.cd_IVA_CODI,
-      target.dt_ART_FCRE = stage.dt_ART_FCRE,
-      target.dt_ART_FMOD = stage.dt_ART_FMOD,
-      target.cd_NI1_CODI = stage.cd_NI1_CODI,
-      target.cd_NI2_CODI = stage.cd_NI2_CODI,
-      target.cd_NI3_CODI = stage.cd_NI3_CODI,
-      target.cd_NI4_CODI = stage.cd_NI4_CODI
+    DELETE target
     FROM ${target} AS target
     INNER JOIN ${stageTable} AS stage
       ON stage.cd_ART_CODI = target.cd_ART_CODI;
@@ -253,7 +240,7 @@ async function updateExistingRows(tx, target, stageTable) {
   return result.recordset?.[0]?.updated || 0;
 }
 
-async function insertMissingRows(tx, target, stageTable) {
+async function insertStageRowsIntoTarget(tx, target, stageTable) {
   const req = createRequest(tx);
   const result = await req.query(`
     INSERT INTO ${target}
@@ -286,10 +273,7 @@ async function insertMissingRows(tx, target, stageTable) {
       stage.cd_NI2_CODI,
       stage.cd_NI3_CODI,
       stage.cd_NI4_CODI
-    FROM ${stageTable} AS stage
-    LEFT JOIN ${target} AS target
-      ON target.cd_ART_CODI = stage.cd_ART_CODI
-    WHERE target.cd_ART_CODI IS NULL;
+    FROM ${stageTable} AS stage;
 
     SELECT @@ROWCOUNT AS inserted;
   `);

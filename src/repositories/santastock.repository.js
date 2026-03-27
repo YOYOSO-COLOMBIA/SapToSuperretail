@@ -60,8 +60,8 @@ async function upsertStockArticulos(tx, rows) {
   await createStageTable(tx, stageTable);
   await insertStageRows(tx, stageRows, stageTable);
 
-  const updated = await updateExistingRows(tx, target, stageTable);
-  const inserted = await insertMissingRows(tx, target, stageTable);
+  const updated = await deleteExistingRows(tx, target, stageTable);
+  const inserted = await insertStageRowsIntoTarget(tx, target, stageTable);
   await dropStageTable(tx, stageTable);
 
   return { updated, inserted };
@@ -135,12 +135,10 @@ async function insertStageRows(tx, rows, stageTable) {
   }
 }
 
-async function updateExistingRows(tx, target, stageTable) {
+async function deleteExistingRows(tx, target, stageTable) {
   const req = createRequest(tx);
   const result = await req.query(`
-    UPDATE target
-    SET
-      target.am_cantidad = stage.am_cantidad
+    DELETE target
     FROM ${target} AS target
     INNER JOIN ${stageTable} AS stage
       ON stage.cd_art_codi = target.cd_art_codi
@@ -152,7 +150,7 @@ async function updateExistingRows(tx, target, stageTable) {
   return result.recordset?.[0]?.updated || 0;
 }
 
-async function insertMissingRows(tx, target, stageTable) {
+async function insertStageRowsIntoTarget(tx, target, stageTable) {
   const req = createRequest(tx);
   const result = await req.query(`
     INSERT INTO ${target}
@@ -165,11 +163,7 @@ async function insertMissingRows(tx, target, stageTable) {
       stage.cd_art_codi,
       stage.cd_codigobodega,
       stage.am_cantidad
-    FROM ${stageTable} AS stage
-    LEFT JOIN ${target} AS target
-      ON target.cd_art_codi = stage.cd_art_codi
-     AND target.cd_codigobodega = stage.cd_codigobodega
-    WHERE target.cd_art_codi IS NULL;
+    FROM ${stageTable} AS stage;
 
     SELECT @@ROWCOUNT AS inserted;
   `);
