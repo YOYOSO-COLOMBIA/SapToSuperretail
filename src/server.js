@@ -22,15 +22,21 @@ function isAuthorized(reqUrl, req) {
   return extractToken(reqUrl, req) === app.runToken;
 }
 
-async function executeSync(trigger) {
+function extractMode(reqUrl, req) {
+  const url = new URL(reqUrl, `http://${req.headers.host || 'localhost'}`);
+  return url.searchParams.get('mode') || '';
+}
+
+async function executeSync(trigger, mode) {
   const startedAt = new Date().toISOString();
-  logger.info('Iniciando sincronizacion por trigger HTTP', { trigger, startedAt });
+  logger.info('Iniciando sincronizacion por trigger HTTP', { trigger, mode, startedAt });
 
   try {
-    const result = await runSync();
+    const result = await runSync({ mode });
     lastRun = {
       ok: true,
       trigger,
+      mode,
       startedAt,
       finishedAt: new Date().toISOString(),
       result
@@ -41,6 +47,7 @@ async function executeSync(trigger) {
     lastRun = {
       ok: false,
       trigger,
+      mode,
       startedAt,
       finishedAt: new Date().toISOString(),
       error: error.message
@@ -53,12 +60,12 @@ async function executeSync(trigger) {
   }
 }
 
-function startRun(trigger) {
+function startRun(trigger, mode) {
   if (currentRun) {
     return { started: false, running: true, promise: currentRun };
   }
 
-  currentRun = executeSync(trigger);
+  currentRun = executeSync(trigger, mode);
   currentRun.catch(() => {});
   return { started: true, running: false, promise: currentRun };
 }
@@ -86,7 +93,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const runState = startRun('http');
+    const mode = extractMode(req.url, req) || 'full';
+    const runState = startRun('http', mode);
 
     if (runState.running) {
       sendJson(res, 409, {
@@ -100,6 +108,7 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 202, {
       ok: true,
       message: 'Sync started',
+      mode,
       lastRun
     });
     return;
@@ -110,7 +119,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       service: 'sap-yoyoso-sync',
       running: Boolean(currentRun),
-      endpoints: ['/health', '/run-sync'],
+      endpoints: ['/health', '/run-sync?mode=full|items|stock|clients|validation'],
       lastRun
     });
     return;
@@ -127,7 +136,7 @@ server.listen(app.port, () => {
   });
 
   if (app.autoRunOnStart) {
-    startRun('startup');
+    startRun('startup', 'full');
   }
 });
 

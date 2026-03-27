@@ -7,35 +7,55 @@ const { upsertStockArticulos } = require('../repositories/santastock.repository'
 const { insertLog } = require('../repositories/log.repository');
 const { app } = require('../config/env');
 
+function normalizeMode(mode) {
+  if (!mode) {
+    if (app.validationOnly) return 'validation';
+    if (app.syncClientsOnly) return 'clients';
+    if (app.syncItemsOnly) return 'items';
+    if (app.syncStockOnly) return 'stock';
+    return 'full';
+  }
+
+  const normalized = String(mode).toLowerCase();
+
+  if (['validation', 'clients', 'items', 'stock', 'full'].includes(normalized)) {
+    return normalized;
+  }
+
+  throw new Error(`Modo de sincronizacion no soportado: ${mode}`);
+}
+
 async function tryInsertLog(tx, payload) {
   try {
     await insertLog(tx, payload);
   } catch (_) {}
 }
 
-function currentProcessName() {
-  if (app.syncClientsOnly) return 'SYNC_SAP_CLIENTES_YOYOSO';
-  if (app.syncItemsOnly) return 'SYNC_SAP_ITEMS_YOYOSO';
-  if (app.syncStockOnly) return 'SYNC_SAP_STOCK_YOYOSO';
+function currentProcessName(mode) {
+  if (mode === 'clients') return 'SYNC_SAP_CLIENTES_YOYOSO';
+  if (mode === 'items') return 'SYNC_SAP_ITEMS_YOYOSO';
+  if (mode === 'stock') return 'SYNC_SAP_STOCK_YOYOSO';
   return 'SYNC_SAP_YOYOSO';
 }
 
-async function runSync() {
+async function runSync(options = {}) {
   const fechaInicio = new Date();
+  const mode = normalizeMode(options.mode);
 
   try {
     const { cookieHeader } = await loginSap();
 
-    if (app.validationOnly) {
+    if (mode === 'validation') {
       const clients = await getSantaClient(cookieHeader);
       return {
         ok: true,
         validationOnly: true,
+        mode,
         clients: clients.length
       };
     }
 
-    if (app.syncClientsOnly) {
+    if (mode === 'clients') {
       const clients = await getSantaClient(cookieHeader);
       let syncResult;
 
@@ -64,7 +84,7 @@ async function runSync() {
       };
     }
 
-    if (app.syncItemsOnly) {
+    if (mode === 'items') {
       const items = await getSantaItem(cookieHeader);
       let syncResult;
 
@@ -93,7 +113,7 @@ async function runSync() {
       };
     }
 
-    if (app.syncStockOnly) {
+    if (mode === 'stock') {
       const stock = await getSantaStock(cookieHeader);
       let syncResult;
 
@@ -165,7 +185,7 @@ async function runSync() {
     try {
       await executeTransaction(async (tx) => {
         await tryInsertLog(tx, {
-          proceso: currentProcessName(),
+          proceso: currentProcessName(mode),
           fechaInicio,
           fechaFin: new Date(),
           estado: 'ERROR',

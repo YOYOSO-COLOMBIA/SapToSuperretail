@@ -101,6 +101,22 @@ Ejemplo:
 curl -X POST "https://tu-app.azurewebsites.net/run-sync?token=TU_TOKEN"
 ```
 
+Tambien puedes ejecutar por tipo de carga sin tocar variables de entorno:
+
+```bash
+curl -X POST "https://tu-app.azurewebsites.net/run-sync?mode=items&token=TU_TOKEN"
+curl -X POST "https://tu-app.azurewebsites.net/run-sync?mode=stock&token=TU_TOKEN"
+curl -X POST "https://tu-app.azurewebsites.net/run-sync?mode=clients&token=TU_TOKEN"
+```
+
+Modos soportados:
+
+- `full`
+- `items`
+- `stock`
+- `clients`
+- `validation`
+
 Si quieres que el proceso corra automaticamente al iniciar el contenedor:
 
 ```env
