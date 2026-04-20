@@ -1,0 +1,159 @@
+const axios = require('axios');
+const { sap } = require('../config/env');
+const { buildHttpsAgent } = require('./sapAuth.service');
+
+const SALES_DEFAULTS = {
+  invoiceSeries: 115,
+  cashAccount: '11100504'
+};
+
+async function validateBusinessPartnerExists(ticket, cookieHeader) {
+  const encodedCardCode = encodeURIComponent(ticket.cardCode);
+  const url = `${sap.baseUrl}${sap.businessPartnersPath}('${encodedCardCode}')`;
+
+  const response = await axios.get(url, {
+    timeout: sap.timeoutMs,
+    httpsAgent: buildHttpsAgent(),
+    headers: {
+      Cookie: cookieHeader,
+      Accept: 'application/json'
+    },
+    validateStatus: () => true
+  });
+
+  if (response.status === 404) {
+    throw new Error(`El cliente ${ticket.cardCode} no existe en SAP. Esta fase solo procesa clientes existentes.`);
+  }
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Error consultando BusinessPartner ${ticket.cardCode} (${response.status}): ${JSON.stringify(response.data)}`);
+  }
+
+  return response.data;
+}
+
+async function createInvoice(ticket, cookieHeader) {
+  const payload = buildInvoicePayload(ticket);
+  return postToSap(sap.invoicesPath, payload, cookieHeader, `Invoice ${ticket.ticketKey}`);
+}
+
+async function createIncomingPayment(ticket, invoiceDocEntry, cookieHeader) {
+  const payload = buildIncomingPaymentPayload(ticket, invoiceDocEntry);
+  return postToSap(sap.incomingPaymentsPath, payload, cookieHeader, `IncomingPayment ${ticket.ticketKey}`);
+}
+
+async function postToSap(path, payload, cookieHeader, label) {
+  const url = `${sap.baseUrl}${path}`;
+  const response = await axios.post(url, payload, {
+    timeout: sap.timeoutMs,
+    httpsAgent: buildHttpsAgent(),
+    headers: {
+      Cookie: cookieHeader,
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    },
+    validateStatus: () => true
+  });
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Error creando ${label} (${response.status}): ${JSON.stringify(response.data)}`);
+  }
+
+  return response.data;
+}
+
+function buildInvoicePayload(ticket) {
+  validateTicket(ticket);
+
+  return {
+    CardCode: ticket.cardCode,
+    DocDate: ticket.docDate,
+    DocDueDate: ticket.docDate,
+    TaxDate: ticket.docDate,
+    NumAtCard: buildNumAtCard(ticket),
+    Comments: ticket.comments || `Venta ${ticket.ticketNumber}`,
+    Series: SALES_DEFAULTS.invoiceSeries,
+    DocumentLines: ticket.lines.map((line) => ({
+      ItemCode: line.itemCode,
+      Quantity: line.quantity,
+      UnitPrice: line.unitPrice,
+      WarehouseCode: line.warehouseCode,
+      TaxCode: line.taxCode,
+      CostingCode: line.costingCode,
+      ...(line.costingCode2 ? { CostingCode2: line.costingCode2 } : {})
+    }))
+  };
+}
+
+function buildIncomingPaymentPayload(ticket, invoiceDocEntry) {
+  validateTicket(ticket);
+  const total = roundMoney(ticket.lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0));
+
+  return {
+    CardCode: ticket.cardCode,
+    DocDate: ticket.docDate,
+    DueDate: ticket.docDate,
+    TaxDate: ticket.docDate,
+    CashAccount: SALES_DEFAULTS.cashAccount,
+    CashSum: total,
+    PaymentInvoices: [
+      {
+        DocEntry: invoiceDocEntry,
+        SumApplied: total,
+        InvoiceType: 'it_Invoice'
+      }
+    ]
+  };
+}
+
+function buildNumAtCard(ticket) {
+  return [
+    ticket.eventType,
+    ticket.storeCode,
+    ticket.cashRegisterCode,
+    ticket.ticketNumber
+  ].join('-');
+}
+
+function validateTicket(ticket) {
+  if (!ticket.cardCode) {
+    throw new Error(`El ticket ${ticket.ticketKey} no tiene cd_codigocliente`);
+  }
+
+  if (!ticket.docDate) {
+    throw new Error(`El ticket ${ticket.ticketKey} no tiene dt_diaoperativo`);
+  }
+
+  if (!Array.isArray(ticket.lines) || ticket.lines.length === 0) {
+    throw new Error(`El ticket ${ticket.ticketKey} no tiene lineas para facturar`);
+  }
+
+  for (const line of ticket.lines) {
+    if (!line.itemCode) {
+      throw new Error(`El ticket ${ticket.ticketKey} tiene una linea sin cd_codigoarticulo`);
+    }
+    if (!line.warehouseCode) {
+      throw new Error(`El ticket ${ticket.ticketKey} tiene una linea sin cd_codigotienda`);
+    }
+  }
+}
+
+function getDocEntry(response, entityName) {
+  const docEntry = response?.DocEntry;
+  if (docEntry === undefined || docEntry === null) {
+    throw new Error(`La respuesta de ${entityName} no devolvio DocEntry: ${JSON.stringify(response)}`);
+  }
+
+  return Number(docEntry);
+}
+
+function roundMoney(value) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+module.exports = {
+  validateBusinessPartnerExists,
+  createInvoice,
+  createIncomingPayment,
+  getDocEntry
+};

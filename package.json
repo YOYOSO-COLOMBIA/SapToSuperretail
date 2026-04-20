@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "sync-once": "node src/jobs/runSync.js",
+    "sync-ventas": "node src/jobs/runVentasSync.js",
     "test-connection": "node src/jobs/testSqlConnection.js",
     "test-sap": "node src/jobs/testSapConnection.js"
   },

@@ -119,7 +119,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       service: 'sap-yoyoso-sync',
       running: Boolean(currentRun),
-      endpoints: ['/health', '/run-sync?mode=full|items|stock|clients|validation'],
+      endpoints: ['/health', '/run-sync?mode=full|items|stock|clients|ventas|validation'],
       lastRun
     });
     return;

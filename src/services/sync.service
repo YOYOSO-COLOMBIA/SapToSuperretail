@@ -4,7 +4,14 @@ const { executeTransaction } = require('./sql.service');
 const { upsertArticuloMaestra } = require('../repositories/santaitem.repository');
 const { upsertClienteMaestra } = require('../repositories/clientemaestra.repository');
 const { upsertStockArticulos } = require('../repositories/santastock.repository');
+const { getVentasTickets, markVentasTicketProcessed } = require('../repositories/ventas.repository');
 const { insertLog } = require('../repositories/log.repository');
+const {
+  validateBusinessPartnerExists,
+  createInvoice,
+  createIncomingPayment,
+  getDocEntry
+} = require('./sapVentas.service');
 const { app } = require('../config/env');
 
 function normalizeMode(mode) {
@@ -18,7 +25,7 @@ function normalizeMode(mode) {
 
   const normalized = String(mode).toLowerCase();
 
-  if (['validation', 'clients', 'items', 'stock', 'full'].includes(normalized)) {
+  if (['validation', 'clients', 'items', 'stock', 'ventas', 'full'].includes(normalized)) {
     return normalized;
   }
 
@@ -35,6 +42,7 @@ function currentProcessName(mode) {
   if (mode === 'clients') return 'SYNC_SAP_CLIENTES_YOYOSO';
   if (mode === 'items') return 'SYNC_SAP_ITEMS_YOYOSO';
   if (mode === 'stock') return 'SYNC_SAP_STOCK_YOYOSO';
+  if (mode === 'ventas') return 'SYNC_SQL_VENTAS_A_SAP_YOYOSO';
   return 'SYNC_SAP_YOYOSO';
 }
 
@@ -138,6 +146,59 @@ async function runSync(options = {}) {
         stock: stock.length,
         updated: syncResult.updated,
         inserted: syncResult.inserted
+      };
+    }
+
+    if (mode === 'ventas') {
+      const tickets = await executeTransaction(async (tx) => getVentasTickets(tx));
+      let processedTickets = 0;
+      let processedLines = 0;
+
+      for (const ticket of tickets) {
+        await validateBusinessPartnerExists(ticket, cookieHeader);
+
+        const invoiceResponse = await createInvoice(ticket, cookieHeader);
+        const invoiceDocEntry = getDocEntry(invoiceResponse, 'factura');
+
+        const paymentResponse = await createIncomingPayment(ticket, invoiceDocEntry, cookieHeader);
+        const paymentDocEntry = getDocEntry(paymentResponse, 'pago');
+
+        await executeTransaction(async (tx) => {
+          await markVentasTicketProcessed(tx, {
+            cardCode: ticket.cardCode,
+            docDate: ticket.docDate,
+            eventType: ticket.eventType,
+            storeCode: ticket.storeCode,
+            cashRegisterCode: ticket.cashRegisterCode,
+            ticketNumber: ticket.ticketNumber,
+            processedAt: new Date(),
+            invoiceDocEntry,
+            paymentDocEntry
+          });
+        });
+
+        processedTickets += 1;
+        processedLines += ticket.lines.length;
+      }
+
+      await executeTransaction(async (tx) => {
+        await tryInsertLog(tx, {
+          proceso: 'SYNC_SQL_VENTAS_A_SAP_YOYOSO',
+          fechaInicio,
+          fechaFin: new Date(),
+          estado: 'OK',
+          mensaje: `Tickets procesados: ${processedTickets}`,
+          registrosItem: processedLines,
+          registrosClient: processedTickets,
+          registrosStock: 0
+        });
+      });
+
+      return {
+        ok: true,
+        mode: 'ventas-only',
+        tickets: processedTickets,
+        lines: processedLines
       };
     }
 
