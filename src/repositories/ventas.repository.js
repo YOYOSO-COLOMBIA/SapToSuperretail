@@ -44,7 +44,7 @@ function groupRowsByTicket(rows) {
       itemCode: cleanValue(row.cd_codigoarticulo),
       quantity: Number(row.am_cantidadarticulo),
       unitPrice: Number(row.am_valorunitario),
-      taxCode: cleanValue(row.cd_codigoiva),
+      taxCode: mapTaxCode(row.cd_codigoiva),
       costingCode: cleanValue(row.cd_centrocosto),
       costingCode2: cleanValue(row.cd_subcentrocosto),
       warehouseCode: cleanValue(row.cd_codigotienda)
@@ -85,6 +85,20 @@ function buildTicketKey(row) {
 function cleanValue(value) {
   if (value === undefined || value === null) return '';
   return String(value).trim();
+}
+
+function mapTaxCode(value) {
+  const taxValue = cleanValue(value);
+
+  if (taxValue === '19') {
+    return 'IVAG02';
+  }
+
+  if (/^IVA[A-Z0-9]+$/i.test(taxValue)) {
+    return taxValue.toUpperCase();
+  }
+
+  return 'IVAG02';
 }
 
 function toSqlDate(value) {
