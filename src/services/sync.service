@@ -4,7 +4,7 @@ const { executeTransaction } = require('./sql.service');
 const { upsertArticuloMaestra } = require('../repositories/santaitem.repository');
 const { upsertClienteMaestra } = require('../repositories/clientemaestra.repository');
 const { upsertStockArticulos } = require('../repositories/santastock.repository');
-const { getVentasTickets, markVentasTicketProcessed } = require('../repositories/ventas.repository');
+const { getVentasTickets } = require('../repositories/ventas.repository');
 const { insertLog } = require('../repositories/log.repository');
 const {
   validateBusinessPartnerExists,
@@ -161,21 +161,7 @@ async function runSync(options = {}) {
         const invoiceDocEntry = getDocEntry(invoiceResponse, 'factura');
 
         const paymentResponse = await createIncomingPayment(ticket, invoiceDocEntry, cookieHeader);
-        const paymentDocEntry = getDocEntry(paymentResponse, 'pago');
-
-        await executeTransaction(async (tx) => {
-          await markVentasTicketProcessed(tx, {
-            cardCode: ticket.cardCode,
-            docDate: ticket.docDate,
-            eventType: ticket.eventType,
-            storeCode: ticket.storeCode,
-            cashRegisterCode: ticket.cashRegisterCode,
-            ticketNumber: ticket.ticketNumber,
-            processedAt: new Date(),
-            invoiceDocEntry,
-            paymentDocEntry
-          });
-        });
+        getDocEntry(paymentResponse, 'pago');
 
         processedTickets += 1;
         processedLines += ticket.lines.length;

@@ -24,7 +24,6 @@ async function getVentasTickets(tx) {
       [cd_centrocosto],
       [cd_subcentrocosto]
     FROM ${ventasTableName()}
-    WHERE ISNULL([fl_procesado_sap], 0) = 0
     ORDER BY
       [dt_diaoperativo],
       [cd_codigotienda],
@@ -100,35 +99,6 @@ function toSqlDate(value) {
   return `${year}-${month}-${day}`;
 }
 
-async function markVentasTicketProcessed(tx, payload) {
-  const req = createRequest(tx);
-  req.input('cd_codigocliente', payload.cardCode);
-  req.input('dt_diaoperativo', payload.docDate);
-  req.input('ds_tipoevento', payload.eventType);
-  req.input('cd_codigotienda', payload.storeCode);
-  req.input('cd_codigocaja', payload.cashRegisterCode);
-  req.input('ds_numerotiquete', payload.ticketNumber);
-  req.input('fe_procesado_sap', payload.processedAt);
-  req.input('nu_docentry_factura_sap', payload.invoiceDocEntry);
-  req.input('nu_docentry_pago_sap', payload.paymentDocEntry);
-
-  await req.query(`
-    UPDATE ${ventasTableName()}
-    SET
-      [fl_procesado_sap] = 1,
-      [fe_procesado_sap] = @fe_procesado_sap,
-      [nu_docentry_factura_sap] = @nu_docentry_factura_sap,
-      [nu_docentry_pago_sap] = @nu_docentry_pago_sap
-    WHERE [cd_codigocliente] = @cd_codigocliente
-      AND CAST([dt_diaoperativo] AS date) = CAST(@dt_diaoperativo AS date)
-      AND [ds_tipoevento] = @ds_tipoevento
-      AND [cd_codigotienda] = @cd_codigotienda
-      AND [cd_codigocaja] = @cd_codigocaja
-      AND [ds_numerotiquete] = @ds_numerotiquete;
-  `);
-}
-
 module.exports = {
-  getVentasTickets,
-  markVentasTicketProcessed
+  getVentasTickets
 };
