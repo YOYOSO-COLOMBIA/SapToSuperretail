@@ -52,7 +52,9 @@ async function createIncomingPaymentForMethod(ticket, payment, invoiceDocEntry, 
       `IncomingPayment ${ticket.ticketKey} metodo ${payment.paymentMethodCode || 'NA'}`
     );
   } catch (error) {
-    throw new Error(`${error.message} | cashAccount=${payload.CashAccount} | amount=${payload.CashSum} | paymentMethodCode=${payment.paymentMethodCode || 'NA'}`);
+    throw new Error(
+      `${error.message} | cashAccount=${payload.CashAccount} | amount=${payload.CashSum} | paymentMethodCode=${payment.paymentMethodCode || 'NA'} | payload=${JSON.stringify(payload)}`
+    );
   }
 }
 
