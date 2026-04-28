@@ -44,12 +44,16 @@ async function createIncomingPayment(ticket, invoiceDocEntry, cookieHeader) {
 
 async function createIncomingPaymentForMethod(ticket, payment, invoiceDocEntry, cookieHeader) {
   const payload = buildIncomingPaymentPayloadForMethod(ticket, payment, invoiceDocEntry);
-  return postToSap(
-    sap.incomingPaymentsPath,
-    payload,
-    cookieHeader,
-    `IncomingPayment ${ticket.ticketKey} metodo ${payment.paymentMethodCode || 'NA'}`
-  );
+  try {
+    return await postToSap(
+      sap.incomingPaymentsPath,
+      payload,
+      cookieHeader,
+      `IncomingPayment ${ticket.ticketKey} metodo ${payment.paymentMethodCode || 'NA'}`
+    );
+  } catch (error) {
+    throw new Error(`${error.message} | cashAccount=${payload.CashAccount} | amount=${payload.CashSum} | paymentMethodCode=${payment.paymentMethodCode || 'NA'}`);
+  }
 }
 
 async function postToSap(path, payload, cookieHeader, label) {
