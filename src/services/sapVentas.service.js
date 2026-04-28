@@ -42,6 +42,16 @@ async function createIncomingPayment(ticket, invoiceDocEntry, cookieHeader) {
   return postToSap(sap.incomingPaymentsPath, payload, cookieHeader, `IncomingPayment ${ticket.ticketKey}`);
 }
 
+async function createIncomingPaymentForMethod(ticket, payment, invoiceDocEntry, cookieHeader) {
+  const payload = buildIncomingPaymentPayloadForMethod(ticket, payment, invoiceDocEntry);
+  return postToSap(
+    sap.incomingPaymentsPath,
+    payload,
+    cookieHeader,
+    `IncomingPayment ${ticket.ticketKey} metodo ${payment.paymentMethodCode || 'NA'}`
+  );
+}
+
 async function postToSap(path, payload, cookieHeader, label) {
   const url = `${sap.baseUrl}${path}`;
   const response = await axios.post(url, payload, {
@@ -106,6 +116,35 @@ function buildIncomingPaymentPayload(ticket, invoiceDocEntry) {
   };
 }
 
+function buildIncomingPaymentPayloadForMethod(ticket, payment, invoiceDocEntry) {
+  validateTicket(ticket);
+
+  if (!payment.cashAccount) {
+    throw new Error(`El ticket ${ticket.ticketKey} tiene un medio de pago sin cd_codigocuenta`);
+  }
+
+  const amount = roundMoney(payment.amount);
+  if (!(amount > 0)) {
+    throw new Error(`El ticket ${ticket.ticketKey} tiene un medio de pago con valor invalido`);
+  }
+
+  return {
+    CardCode: ticket.cardCode,
+    DocDate: ticket.docDate,
+    DueDate: ticket.docDate,
+    TaxDate: ticket.docDate,
+    CashAccount: payment.cashAccount,
+    CashSum: amount,
+    PaymentInvoices: [
+      {
+        DocEntry: invoiceDocEntry,
+        SumApplied: amount,
+        InvoiceType: 'it_Invoice'
+      }
+    ]
+  };
+}
+
 function buildNumAtCard(ticket) {
   return [
     ticket.eventType,
@@ -162,6 +201,8 @@ module.exports = {
   validateBusinessPartnerExists,
   createInvoice,
   createIncomingPayment,
+  createIncomingPaymentForMethod,
   getDocEntry,
-  getDocumentInfo
+  getDocumentInfo,
+  roundMoney
 };

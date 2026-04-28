@@ -4,13 +4,15 @@ const { executeTransaction } = require('./sql.service');
 const { upsertArticuloMaestra } = require('../repositories/santaitem.repository');
 const { upsertClienteMaestra } = require('../repositories/clientemaestra.repository');
 const { upsertStockArticulos } = require('../repositories/santastock.repository');
-const { getVentasTickets } = require('../repositories/ventas.repository');
+const { getVentasTickets, buildRelaxedTicketKey } = require('../repositories/ventas.repository');
+const { getMediosPagoTickets } = require('../repositories/mediospagos.repository');
 const { insertLog } = require('../repositories/log.repository');
 const {
   validateBusinessPartnerExists,
   createInvoice,
-  createIncomingPayment,
-  getDocumentInfo
+  createIncomingPaymentForMethod,
+  getDocumentInfo,
+  roundMoney
 } = require('./sapVentas.service');
 const { app } = require('../config/env');
 
@@ -150,19 +152,42 @@ async function runSync(options = {}) {
     }
 
     if (mode === 'ventas') {
-      const tickets = await executeTransaction(async (tx) => getVentasTickets(tx));
+      const { tickets, mediosPagoTickets } = await executeTransaction(async (tx) => {
+        const ventas = await getVentasTickets(tx);
+        const medios = await getMediosPagoTickets(tx);
+
+        return {
+          tickets: ventas,
+          mediosPagoTickets: medios
+        };
+      });
+
+      const mediosPagoIndex = indexMediosPagoTickets(mediosPagoTickets);
       let processedTickets = 0;
       let processedLines = 0;
       const documents = [];
 
       for (const ticket of tickets) {
+        const mediosPago = resolveTicketPayments(ticket, mediosPagoIndex);
+        validatePaymentsAgainstInvoice(ticket, mediosPago);
+
         await validateBusinessPartnerExists(ticket, cookieHeader);
 
         const invoiceResponse = await createInvoice(ticket, cookieHeader);
         const invoiceInfo = getDocumentInfo(invoiceResponse, 'factura');
 
-        const paymentResponse = await createIncomingPayment(ticket, invoiceInfo.docEntry, cookieHeader);
-        const paymentInfo = getDocumentInfo(paymentResponse, 'pago');
+        const paymentInfos = [];
+        for (const payment of mediosPago.payments) {
+          const paymentResponse = await createIncomingPaymentForMethod(ticket, payment, invoiceInfo.docEntry, cookieHeader);
+          const paymentInfo = getDocumentInfo(paymentResponse, 'pago');
+          paymentInfos.push({
+            paymentMethodCode: payment.paymentMethodCode,
+            cashAccount: payment.cashAccount,
+            amount: roundMoney(payment.amount),
+            paymentDocEntry: paymentInfo.docEntry,
+            paymentDocNum: paymentInfo.docNum
+          });
+        }
 
         processedTickets += 1;
         processedLines += ticket.lines.length;
@@ -171,8 +196,7 @@ async function runSync(options = {}) {
           cardCode: ticket.cardCode,
           invoiceDocEntry: invoiceInfo.docEntry,
           invoiceDocNum: invoiceInfo.docNum,
-          paymentDocEntry: paymentInfo.docEntry,
-          paymentDocNum: paymentInfo.docNum
+          payments: paymentInfos
         });
       }
 
@@ -262,3 +286,54 @@ async function runSync(options = {}) {
 }
 
 module.exports = { runSync };
+
+function indexMediosPagoTickets(rows) {
+  const byExact = new Map();
+  const byRelaxed = new Map();
+
+  for (const row of rows) {
+    byExact.set(row.exactKey, row);
+
+    const relaxedGroup = byRelaxed.get(row.relaxedKey) || [];
+    relaxedGroup.push(row);
+    byRelaxed.set(row.relaxedKey, relaxedGroup);
+  }
+
+  return { byExact, byRelaxed };
+}
+
+function resolveTicketPayments(ticket, mediosPagoIndex) {
+  const exactMatch = mediosPagoIndex.byExact.get(ticket.ticketKey);
+  if (exactMatch) return exactMatch;
+
+  const relaxedKey = buildRelaxedTicketKey({
+    cd_codigocliente: ticket.cardCode,
+    dt_diaoperativo: ticket.docDate,
+    ds_numerotiquete: ticket.ticketNumber
+  });
+
+  const relaxedMatches = mediosPagoIndex.byRelaxed.get(relaxedKey) || [];
+
+  if (relaxedMatches.length === 1) {
+    return relaxedMatches[0];
+  }
+
+  if (relaxedMatches.length > 1) {
+    throw new Error(`El ticket ${ticket.ticketKey} tiene multiples coincidencias en MEDIOSPAGOS y no se puede resolver de forma unica.`);
+  }
+
+  throw new Error(`El ticket ${ticket.ticketKey} no tiene medios de pago asociados en MEDIOSPAGOS.`);
+}
+
+function validatePaymentsAgainstInvoice(ticket, mediosPago) {
+  if (!Array.isArray(mediosPago.payments) || mediosPago.payments.length === 0) {
+    throw new Error(`El ticket ${ticket.ticketKey} no tiene medios de pago validos.`);
+  }
+
+  const invoiceTotal = roundMoney(ticket.lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0));
+  const paymentTotal = roundMoney(mediosPago.payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+
+  if (invoiceTotal !== paymentTotal) {
+    throw new Error(`El ticket ${ticket.ticketKey} tiene total factura ${invoiceTotal} y total medios de pago ${paymentTotal}.`);
+  }
+}

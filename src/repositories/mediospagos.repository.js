@@ -1,11 +1,11 @@
 const { createRequest, tableName } = require('../services/sql.service');
 const { app } = require('../config/env');
 
-function ventasTableName() {
-  return tableName(app.schema, 'VENTAS');
+function mediosPagosTableName() {
+  return tableName(app.schema, 'MEDIOSPAGOS');
 }
 
-async function getVentasTickets(tx) {
+async function getMediosPagoTickets(tx) {
   const req = createRequest(tx);
 
   const result = await req.query(`
@@ -16,20 +16,15 @@ async function getVentasTickets(tx) {
       [cd_codigotienda],
       [cd_codigocaja],
       [ds_numerotiquete],
-      [ds_observacionventa],
-      [cd_codigoarticulo],
-      [am_cantidadarticulo],
-      [am_valorunitario],
-      [cd_codigoiva],
-      [cd_centrocosto],
-      [cd_subcentrocosto]
-    FROM ${ventasTableName()}
+      [cd_codigomedio],
+      [am_valor],
+      [cd_codigocuenta]
+    FROM ${mediosPagosTableName()}
     ORDER BY
       [dt_diaoperativo],
-      [cd_codigotienda],
-      [cd_codigocaja],
+      [cd_codigocliente],
       [ds_numerotiquete],
-      [cd_codigoarticulo];
+      [cd_codigomedio];
   `);
 
   return groupRowsByTicket(result.recordset || []);
@@ -39,39 +34,36 @@ function groupRowsByTicket(rows) {
   const grouped = new Map();
 
   for (const row of rows) {
-    const ticketKey = buildTicketKey(row);
-    const line = {
-      itemCode: cleanValue(row.cd_codigoarticulo),
-      quantity: Number(row.am_cantidadarticulo),
-      unitPrice: Number(row.am_valorunitario),
-      taxCode: mapTaxCode(row.cd_codigoiva),
-      costingCode: cleanValue(row.cd_centrocosto),
-      costingCode2: cleanValue(row.cd_subcentrocosto),
-      warehouseCode: cleanValue(row.cd_codigotienda)
+    const exactKey = buildExactKey(row);
+    const relaxedKey = buildRelaxedKey(row);
+    const payment = {
+      paymentMethodCode: cleanValue(row.cd_codigomedio),
+      cashAccount: cleanValue(row.cd_codigocuenta),
+      amount: Number(row.am_valor)
     };
 
-    if (!grouped.has(ticketKey)) {
-      grouped.set(ticketKey, {
-        ticketKey,
+    if (!grouped.has(exactKey)) {
+      grouped.set(exactKey, {
+        exactKey,
+        relaxedKey,
         cardCode: cleanValue(row.cd_codigocliente),
         docDate: toSqlDate(row.dt_diaoperativo),
         eventType: cleanValue(row.ds_tipoevento),
         storeCode: cleanValue(row.cd_codigotienda),
         cashRegisterCode: cleanValue(row.cd_codigocaja),
         ticketNumber: cleanValue(row.ds_numerotiquete),
-        comments: cleanValue(row.ds_observacionventa),
-        lines: [line]
+        payments: [payment]
       });
       continue;
     }
 
-    grouped.get(ticketKey).lines.push(line);
+    grouped.get(exactKey).payments.push(payment);
   }
 
   return [...grouped.values()];
 }
 
-function buildTicketKey(row) {
+function buildExactKey(row) {
   return [
     cleanValue(row.cd_codigocliente),
     toSqlDate(row.dt_diaoperativo),
@@ -82,7 +74,7 @@ function buildTicketKey(row) {
   ].join('|');
 }
 
-function buildRelaxedTicketKey(row) {
+function buildRelaxedKey(row) {
   return [
     cleanValue(row.cd_codigocliente),
     toSqlDate(row.dt_diaoperativo),
@@ -93,20 +85,6 @@ function buildRelaxedTicketKey(row) {
 function cleanValue(value) {
   if (value === undefined || value === null) return '';
   return String(value).trim();
-}
-
-function mapTaxCode(value) {
-  const taxValue = cleanValue(value);
-
-  if (taxValue === '19') {
-    return 'IVAG02';
-  }
-
-  if (/^IVA[A-Z0-9]+$/i.test(taxValue)) {
-    return taxValue.toUpperCase();
-  }
-
-  return 'IVAG02';
 }
 
 function normalizeLooseCode(value) {
@@ -133,6 +111,8 @@ function toSqlDate(value) {
 }
 
 module.exports = {
-  getVentasTickets,
-  buildRelaxedTicketKey
+  getMediosPagoTickets,
+  buildRelaxedKey,
+  buildExactKey,
+  normalizeLooseCode
 };
