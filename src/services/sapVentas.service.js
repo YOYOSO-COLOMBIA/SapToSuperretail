@@ -147,6 +147,13 @@ function getDocEntry(response, entityName) {
   return Number(docEntry);
 }
 
+function getDocumentInfo(response, entityName) {
+  return {
+    docEntry: getDocEntry(response, entityName),
+    docNum: response?.DocNum ?? null
+  };
+}
+
 function roundMoney(value) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -155,5 +162,6 @@ module.exports = {
   validateBusinessPartnerExists,
   createInvoice,
   createIncomingPayment,
-  getDocEntry
+  getDocEntry,
+  getDocumentInfo
 };

@@ -10,7 +10,7 @@ const {
   validateBusinessPartnerExists,
   createInvoice,
   createIncomingPayment,
-  getDocEntry
+  getDocumentInfo
 } = require('./sapVentas.service');
 const { app } = require('../config/env');
 
@@ -153,18 +153,27 @@ async function runSync(options = {}) {
       const tickets = await executeTransaction(async (tx) => getVentasTickets(tx));
       let processedTickets = 0;
       let processedLines = 0;
+      const documents = [];
 
       for (const ticket of tickets) {
         await validateBusinessPartnerExists(ticket, cookieHeader);
 
         const invoiceResponse = await createInvoice(ticket, cookieHeader);
-        const invoiceDocEntry = getDocEntry(invoiceResponse, 'factura');
+        const invoiceInfo = getDocumentInfo(invoiceResponse, 'factura');
 
-        const paymentResponse = await createIncomingPayment(ticket, invoiceDocEntry, cookieHeader);
-        getDocEntry(paymentResponse, 'pago');
+        const paymentResponse = await createIncomingPayment(ticket, invoiceInfo.docEntry, cookieHeader);
+        const paymentInfo = getDocumentInfo(paymentResponse, 'pago');
 
         processedTickets += 1;
         processedLines += ticket.lines.length;
+        documents.push({
+          ticketKey: ticket.ticketKey,
+          cardCode: ticket.cardCode,
+          invoiceDocEntry: invoiceInfo.docEntry,
+          invoiceDocNum: invoiceInfo.docNum,
+          paymentDocEntry: paymentInfo.docEntry,
+          paymentDocNum: paymentInfo.docNum
+        });
       }
 
       await executeTransaction(async (tx) => {
@@ -173,7 +182,10 @@ async function runSync(options = {}) {
           fechaInicio,
           fechaFin: new Date(),
           estado: 'OK',
-          mensaje: `Tickets procesados: ${processedTickets}`,
+          mensaje: JSON.stringify({
+            ticketsProcesados: processedTickets,
+            documentos: documents
+          }),
           registrosItem: processedLines,
           registrosClient: processedTickets,
           registrosStock: 0
@@ -184,7 +196,8 @@ async function runSync(options = {}) {
         ok: true,
         mode: 'ventas-only',
         tickets: processedTickets,
-        lines: processedLines
+        lines: processedLines,
+        documents
       };
     }
 
