@@ -12,7 +12,8 @@ const {
   createInvoice,
   createIncomingPaymentForMethod,
   getDocumentInfo,
-  roundMoney
+  roundMoney,
+  calculateExpectedInvoiceTotal
 } = require('./sapVentas.service');
 const { app } = require('../config/env');
 
@@ -330,7 +331,7 @@ function validatePaymentsAgainstInvoice(ticket, mediosPago) {
     throw new Error(`El ticket ${ticket.ticketKey} no tiene medios de pago validos.`);
   }
 
-  const invoiceTotal = roundMoney(ticket.lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0));
+  const invoiceTotal = calculateExpectedInvoiceTotal(ticket);
   const paymentTotal = roundMoney(mediosPago.payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
 
   if (invoiceTotal !== paymentTotal) {

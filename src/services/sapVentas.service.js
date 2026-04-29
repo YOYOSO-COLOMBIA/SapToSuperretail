@@ -103,7 +103,7 @@ function buildInvoicePayload(ticket) {
 
 function buildIncomingPaymentPayload(ticket, invoiceDocEntry) {
   validateTicket(ticket);
-  const total = roundMoney(ticket.lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0));
+  const total = calculateExpectedInvoiceTotal(ticket);
 
   return {
     CardCode: ticket.cardCode,
@@ -203,6 +203,25 @@ function roundMoney(value) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+function calculateExpectedInvoiceTotal(ticket) {
+  validateTicket(ticket);
+
+  return roundMoney(ticket.lines.reduce((sum, line) => {
+    const net = Number(line.quantity) * Number(line.unitPrice);
+    const taxMultiplier = 1 + getTaxRate(line.taxCode);
+    return sum + (net * taxMultiplier);
+  }, 0));
+}
+
+function getTaxRate(taxCode) {
+  const normalized = String(taxCode || '').trim().toUpperCase();
+
+  if (!normalized) return 0;
+  if (normalized === 'IVAG02') return 0.19;
+
+  return 0;
+}
+
 module.exports = {
   validateBusinessPartnerExists,
   createInvoice,
@@ -210,5 +229,6 @@ module.exports = {
   createIncomingPaymentForMethod,
   getDocEntry,
   getDocumentInfo,
-  roundMoney
+  roundMoney,
+  calculateExpectedInvoiceTotal
 };
