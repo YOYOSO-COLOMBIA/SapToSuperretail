@@ -336,6 +336,17 @@ function validatePaymentsAgainstInvoice(ticket, mediosPago) {
   const difference = roundMoney(Math.abs(invoiceTotal - paymentTotal));
 
   if (difference > 0.1) {
-    throw new Error(`El ticket ${ticket.ticketKey} tiene total factura ${invoiceTotal} y total medios de pago ${paymentTotal}. Diferencia ${difference}.`);
+    throw new Error(
+      `El ticket ${ticket.ticketKey} tiene total factura ${invoiceTotal} y total medios de pago ${paymentTotal}. Diferencia ${difference}. payload=${JSON.stringify({
+        ticketKey: ticket.ticketKey,
+        cardCode: ticket.cardCode,
+        docDate: ticket.docDate,
+        invoiceTotal,
+        paymentTotal,
+        difference,
+        lines: ticket.lines,
+        payments: mediosPago.payments
+      })}`
+    );
   }
 }
