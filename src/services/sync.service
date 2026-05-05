@@ -333,8 +333,9 @@ function validatePaymentsAgainstInvoice(ticket, mediosPago) {
 
   const invoiceTotal = calculateExpectedInvoiceTotal(ticket);
   const paymentTotal = roundMoney(mediosPago.payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+  const difference = roundMoney(Math.abs(invoiceTotal - paymentTotal));
 
-  if (invoiceTotal !== paymentTotal) {
-    throw new Error(`El ticket ${ticket.ticketKey} tiene total factura ${invoiceTotal} y total medios de pago ${paymentTotal}.`);
+  if (difference > 0.1) {
+    throw new Error(`El ticket ${ticket.ticketKey} tiene total factura ${invoiceTotal} y total medios de pago ${paymentTotal}. Diferencia ${difference}.`);
   }
 }
