@@ -212,7 +212,7 @@ function calculateExpectedInvoiceTotal(ticket) {
 
   if (ticket.documentType === 'credit-note') {
     return roundMoney(ticket.lines.reduce((sum, line) => {
-      return sum + calculateSignedLineNet(line);
+      return sum + calculatePositiveLineNet(line);
     }, 0));
   }
 
@@ -252,21 +252,16 @@ function buildDocumentLine(ticket, line) {
 }
 
 function normalizeCreditNoteLine(line) {
-  const quantity = Number(line.quantity);
   const unitPrice = Number(line.unitPrice);
-  const sign = quantity < 0 || unitPrice < 0 ? -1 : 1;
 
   return {
-    quantity: sign * Math.abs(quantity),
+    quantity: Math.abs(Number(line.quantity)),
     unitPrice: Math.abs(unitPrice)
   };
 }
 
-function calculateSignedLineNet(line) {
-  const quantity = Number(line.quantity);
-  const unitPrice = Number(line.unitPrice);
-  const sign = quantity < 0 || unitPrice < 0 ? -1 : 1;
-  return sign * Math.abs(quantity) * Math.abs(unitPrice);
+function calculatePositiveLineNet(line) {
+  return Math.abs(Number(line.quantity)) * Math.abs(Number(line.unitPrice));
 }
 
 module.exports = {
