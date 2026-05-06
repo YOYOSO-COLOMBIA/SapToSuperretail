@@ -181,7 +181,14 @@ async function runSync(options = {}) {
 
         const paymentInfos = [];
         for (const payment of mediosPago.payments) {
-          const paymentResponse = await createIncomingPaymentForMethod(salesContext.ticket, payment, documentInfo.docEntry, cookieHeader);
+          let paymentResponse;
+          try {
+            paymentResponse = await createIncomingPaymentForMethod(salesContext.ticket, payment, documentInfo.docEntry, cookieHeader);
+          } catch (error) {
+            throw new Error(
+              `${error.message} | documentDocEntry=${documentInfo.docEntry} | documentDocNum=${documentInfo.docNum ?? 'null'} | documentDocTotal=${documentInfo.docTotal ?? 'null'} | documentPayload=${JSON.stringify(documentInfo.debug?.payload || null)} | documentResponse=${JSON.stringify(documentInfo.responseData || null)}`
+            );
+          }
           const paymentInfo = getDocumentInfo(paymentResponse, 'pago');
           paymentInfos.push({
             paymentMethodCode: payment.paymentMethodCode,
