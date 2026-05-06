@@ -48,7 +48,7 @@ function groupRowsByTicket(rows) {
         relaxedKey,
         cardCode: cleanValue(row.cd_codigocliente),
         docDate: toSqlDate(row.dt_diaoperativo),
-        eventType: cleanValue(row.ds_tipoevento),
+        eventType: normalizeLooseCode(row.ds_tipoevento),
         storeCode: cleanValue(row.cd_codigotienda),
         cashRegisterCode: cleanValue(row.cd_codigocaja),
         ticketNumber: cleanValue(row.ds_numerotiquete),

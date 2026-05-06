@@ -10,6 +10,7 @@ const { insertLog } = require('../repositories/log.repository');
 const {
   validateBusinessPartnerExists,
   createInvoice,
+  createCreditNote,
   createIncomingPaymentForMethod,
   getDocumentInfo,
   roundMoney,
@@ -170,16 +171,17 @@ async function runSync(options = {}) {
 
       for (const ticket of tickets) {
         const mediosPago = resolveTicketPayments(ticket, mediosPagoIndex);
-        validatePaymentsAgainstInvoice(ticket, mediosPago);
+        const salesContext = resolveSalesDocumentContext(ticket, mediosPago);
+        validatePaymentsAgainstInvoice(salesContext.ticket, mediosPago);
 
-        await validateBusinessPartnerExists(ticket, cookieHeader);
+        await validateBusinessPartnerExists(salesContext.ticket, cookieHeader);
 
-        const invoiceResponse = await createInvoice(ticket, cookieHeader);
-        const invoiceInfo = getDocumentInfo(invoiceResponse, 'factura');
+        const documentResponse = await createSalesDocument(salesContext.ticket, cookieHeader);
+        const documentInfo = getDocumentInfo(documentResponse, salesContext.entityLabel);
 
         const paymentInfos = [];
         for (const payment of mediosPago.payments) {
-          const paymentResponse = await createIncomingPaymentForMethod(ticket, payment, invoiceInfo.docEntry, cookieHeader);
+          const paymentResponse = await createIncomingPaymentForMethod(salesContext.ticket, payment, documentInfo.docEntry, cookieHeader);
           const paymentInfo = getDocumentInfo(paymentResponse, 'pago');
           paymentInfos.push({
             paymentMethodCode: payment.paymentMethodCode,
@@ -191,12 +193,14 @@ async function runSync(options = {}) {
         }
 
         processedTickets += 1;
-        processedLines += ticket.lines.length;
+        processedLines += salesContext.ticket.lines.length;
         documents.push({
-          ticketKey: ticket.ticketKey,
-          cardCode: ticket.cardCode,
-          invoiceDocEntry: invoiceInfo.docEntry,
-          invoiceDocNum: invoiceInfo.docNum,
+          ticketKey: salesContext.ticket.ticketKey,
+          cardCode: salesContext.ticket.cardCode,
+          documentType: salesContext.documentType,
+          eventType: salesContext.ticket.eventType,
+          documentDocEntry: documentInfo.docEntry,
+          documentDocNum: documentInfo.docNum,
           payments: paymentInfos
         });
       }
@@ -349,4 +353,44 @@ function validatePaymentsAgainstInvoice(ticket, mediosPago) {
       })}`
     );
   }
+}
+
+function resolveSalesDocumentContext(ticket, mediosPago) {
+  const eventType = String(mediosPago.eventType || '').trim();
+  const normalizedTicket = {
+    ...ticket,
+    eventType
+  };
+
+  if (eventType === app.salesInvoiceEventType) {
+    return {
+      ticket: {
+        ...normalizedTicket,
+        documentType: 'invoice'
+      },
+      documentType: 'invoice',
+      entityLabel: 'factura'
+    };
+  }
+
+  if (eventType === app.salesCreditNoteEventType) {
+    return {
+      ticket: {
+        ...normalizedTicket,
+        documentType: 'credit-note'
+      },
+      documentType: 'credit-note',
+      entityLabel: 'nota credito'
+    };
+  }
+
+  throw new Error(`El ticket ${ticket.ticketKey} tiene ds_tipoevento ${eventType} en MEDIOSPAGOS y no esta configurado para generar documento.`);
+}
+
+async function createSalesDocument(ticket, cookieHeader) {
+  if (ticket.documentType === 'credit-note') {
+    return createCreditNote(ticket, cookieHeader);
+  }
+
+  return createInvoice(ticket, cookieHeader);
 }

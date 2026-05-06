@@ -1,11 +1,6 @@
 const axios = require('axios');
-const { sap } = require('../config/env');
+const { sap, app } = require('../config/env');
 const { buildHttpsAgent } = require('./sapAuth.service');
-
-const SALES_DEFAULTS = {
-  invoiceSeries: 115,
-  cashAccount: '11100504'
-};
 
 async function validateBusinessPartnerExists(ticket, cookieHeader) {
   const encodedCardCode = encodeURIComponent(ticket.cardCode);
@@ -33,8 +28,13 @@ async function validateBusinessPartnerExists(ticket, cookieHeader) {
 }
 
 async function createInvoice(ticket, cookieHeader) {
-  const payload = buildInvoicePayload(ticket);
+  const payload = buildCommercialDocumentPayload(ticket, app.salesInvoiceSeries);
   return postToSap(sap.invoicesPath, payload, cookieHeader, `Invoice ${ticket.ticketKey}`);
+}
+
+async function createCreditNote(ticket, cookieHeader) {
+  const payload = buildCommercialDocumentPayload(ticket, app.salesCreditNoteSeries);
+  return postToSap(sap.creditNotesPath, payload, cookieHeader, `CreditNote ${ticket.ticketKey}`);
 }
 
 async function createIncomingPayment(ticket, invoiceDocEntry, cookieHeader) {
@@ -79,6 +79,10 @@ async function postToSap(path, payload, cookieHeader, label) {
 }
 
 function buildInvoicePayload(ticket) {
+  return buildCommercialDocumentPayload(ticket, app.salesInvoiceSeries);
+}
+
+function buildCommercialDocumentPayload(ticket, series) {
   validateTicket(ticket);
 
   return {
@@ -88,7 +92,7 @@ function buildInvoicePayload(ticket) {
     TaxDate: ticket.docDate,
     NumAtCard: buildNumAtCard(ticket),
     Comments: ticket.comments || `Venta ${ticket.ticketNumber}`,
-    Series: SALES_DEFAULTS.invoiceSeries,
+    Series: series,
     DocumentLines: ticket.lines.map((line) => ({
       ItemCode: line.itemCode,
       Quantity: line.quantity,
@@ -116,7 +120,7 @@ function buildIncomingPaymentPayload(ticket, invoiceDocEntry) {
       {
         DocEntry: invoiceDocEntry,
         SumApplied: total,
-        InvoiceType: 'it_Invoice'
+        InvoiceType: resolvePaymentInvoiceType(ticket.documentType)
       }
     ]
   };
@@ -145,10 +149,18 @@ function buildIncomingPaymentPayloadForMethod(ticket, payment, invoiceDocEntry) 
       {
         DocEntry: invoiceDocEntry,
         SumApplied: amount,
-        InvoiceType: 'it_Invoice'
+        InvoiceType: resolvePaymentInvoiceType(ticket.documentType)
       }
     ]
   };
+}
+
+function resolvePaymentInvoiceType(documentType) {
+  if (documentType === 'credit-note') {
+    return 'it_CredItnote';
+  }
+
+  return 'it_Invoice';
 }
 
 function buildNumAtCard(ticket) {
@@ -225,6 +237,7 @@ function getTaxRate(taxCode) {
 module.exports = {
   validateBusinessPartnerExists,
   createInvoice,
+  createCreditNote,
   createIncomingPayment,
   createIncomingPaymentForMethod,
   getDocEntry,
