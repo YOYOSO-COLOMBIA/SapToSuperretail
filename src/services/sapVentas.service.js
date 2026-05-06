@@ -93,15 +93,7 @@ function buildCommercialDocumentPayload(ticket, series) {
     NumAtCard: buildNumAtCard(ticket),
     Comments: ticket.comments || `Venta ${ticket.ticketNumber}`,
     Series: series,
-    DocumentLines: ticket.lines.map((line) => ({
-      ItemCode: line.itemCode,
-      Quantity: line.quantity,
-      UnitPrice: line.unitPrice,
-      WarehouseCode: line.warehouseCode,
-      TaxCode: line.taxCode,
-      CostingCode: line.costingCode,
-      ...(line.costingCode2 ? { CostingCode2: line.costingCode2 } : {})
-    }))
+    DocumentLines: ticket.lines.map((line) => buildDocumentLine(ticket, line))
   };
 }
 
@@ -218,6 +210,12 @@ function roundMoney(value) {
 function calculateExpectedInvoiceTotal(ticket) {
   validateTicket(ticket);
 
+  if (ticket.documentType === 'credit-note') {
+    return roundMoney(ticket.lines.reduce((sum, line) => {
+      return sum + calculateSignedLineNet(line);
+    }, 0));
+  }
+
   return roundMoney(ticket.lines.reduce((sum, line) => {
     const net = Number(line.quantity) * Number(line.unitPrice);
     const taxMultiplier = 1 + getTaxRate(line.taxCode);
@@ -232,6 +230,43 @@ function getTaxRate(taxCode) {
   if (normalized === 'IVAG02') return 0.19;
 
   return 0;
+}
+
+function buildDocumentLine(ticket, line) {
+  const normalized = ticket.documentType === 'credit-note'
+    ? normalizeCreditNoteLine(line)
+    : {
+        quantity: Number(line.quantity),
+        unitPrice: Number(line.unitPrice)
+      };
+
+  return {
+    ItemCode: line.itemCode,
+    Quantity: normalized.quantity,
+    UnitPrice: normalized.unitPrice,
+    WarehouseCode: line.warehouseCode,
+    TaxCode: line.taxCode,
+    CostingCode: line.costingCode,
+    ...(line.costingCode2 ? { CostingCode2: line.costingCode2 } : {})
+  };
+}
+
+function normalizeCreditNoteLine(line) {
+  const quantity = Number(line.quantity);
+  const unitPrice = Number(line.unitPrice);
+  const sign = quantity < 0 || unitPrice < 0 ? -1 : 1;
+
+  return {
+    quantity: sign * Math.abs(quantity),
+    unitPrice: Math.abs(unitPrice)
+  };
+}
+
+function calculateSignedLineNet(line) {
+  const quantity = Number(line.quantity);
+  const unitPrice = Number(line.unitPrice);
+  const sign = quantity < 0 || unitPrice < 0 ? -1 : 1;
+  return sign * Math.abs(quantity) * Math.abs(unitPrice);
 }
 
 module.exports = {
