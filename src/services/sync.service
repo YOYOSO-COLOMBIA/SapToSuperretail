@@ -201,6 +201,9 @@ async function runSync(options = {}) {
           eventType: salesContext.ticket.eventType,
           documentDocEntry: documentInfo.docEntry,
           documentDocNum: documentInfo.docNum,
+          documentDocTotal: documentInfo.docTotal,
+          documentPayload: documentInfo.debug?.payload || null,
+          documentResponse: documentInfo.responseData || null,
           payments: paymentInfos
         });
       }

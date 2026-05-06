@@ -29,12 +29,12 @@ async function validateBusinessPartnerExists(ticket, cookieHeader) {
 
 async function createInvoice(ticket, cookieHeader) {
   const payload = buildCommercialDocumentPayload(ticket, app.salesInvoiceSeries);
-  return postToSap(sap.invoicesPath, payload, cookieHeader, `Invoice ${ticket.ticketKey}`);
+  return postCommercialDocument(sap.invoicesPath, payload, cookieHeader, `Invoice ${ticket.ticketKey}`);
 }
 
 async function createCreditNote(ticket, cookieHeader) {
   const payload = buildCommercialDocumentPayload(ticket, app.salesCreditNoteSeries);
-  return postToSap(sap.creditNotesPath, payload, cookieHeader, `CreditNote ${ticket.ticketKey}`);
+  return postCommercialDocument(sap.creditNotesPath, payload, cookieHeader, `CreditNote ${ticket.ticketKey}`);
 }
 
 async function createIncomingPayment(ticket, invoiceDocEntry, cookieHeader) {
@@ -76,6 +76,20 @@ async function postToSap(path, payload, cookieHeader, label) {
   }
 
   return response.data;
+}
+
+async function postCommercialDocument(path, payload, cookieHeader, label) {
+  try {
+    const response = await postToSap(path, payload, cookieHeader, label);
+    return {
+      data: response,
+      debug: {
+        payload
+      }
+    };
+  } catch (error) {
+    throw new Error(`${error.message} | payload=${JSON.stringify(payload)}`);
+  }
 }
 
 function buildInvoicePayload(ticket) {
@@ -197,9 +211,13 @@ function getDocEntry(response, entityName) {
 }
 
 function getDocumentInfo(response, entityName) {
+  const data = response?.data || response;
   return {
-    docEntry: getDocEntry(response, entityName),
-    docNum: response?.DocNum ?? null
+    docEntry: getDocEntry(data, entityName),
+    docNum: data?.DocNum ?? null,
+    docTotal: data?.DocTotal ?? null,
+    responseData: data,
+    debug: response?.debug || null
   };
 }
 
