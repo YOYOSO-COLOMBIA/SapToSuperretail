@@ -180,23 +180,25 @@ async function runSync(options = {}) {
         const documentInfo = getDocumentInfo(documentResponse, salesContext.entityLabel);
 
         const paymentInfos = [];
-        for (const payment of mediosPago.payments) {
-          let paymentResponse;
-          try {
-            paymentResponse = await createIncomingPaymentForMethod(salesContext.ticket, payment, documentInfo.docEntry, cookieHeader);
-          } catch (error) {
-            throw new Error(
-              `${error.message} | documentDocEntry=${documentInfo.docEntry} | documentDocNum=${documentInfo.docNum ?? 'null'} | documentDocTotal=${documentInfo.docTotal ?? 'null'} | documentPayload=${JSON.stringify(documentInfo.debug?.payload || null)} | documentResponse=${JSON.stringify(documentInfo.responseData || null)}`
-            );
+        if (salesContext.documentType !== 'credit-note') {
+          for (const payment of mediosPago.payments) {
+            let paymentResponse;
+            try {
+              paymentResponse = await createIncomingPaymentForMethod(salesContext.ticket, payment, documentInfo.docEntry, cookieHeader);
+            } catch (error) {
+              throw new Error(
+                `${error.message} | documentDocEntry=${documentInfo.docEntry} | documentDocNum=${documentInfo.docNum ?? 'null'} | documentDocTotal=${documentInfo.docTotal ?? 'null'} | documentPayload=${JSON.stringify(documentInfo.debug?.payload || null)} | documentResponse=${JSON.stringify(documentInfo.responseData || null)}`
+              );
+            }
+            const paymentInfo = getDocumentInfo(paymentResponse, 'pago');
+            paymentInfos.push({
+              paymentMethodCode: payment.paymentMethodCode,
+              cashAccount: payment.cashAccount,
+              amount: roundMoney(payment.amount),
+              paymentDocEntry: paymentInfo.docEntry,
+              paymentDocNum: paymentInfo.docNum
+            });
           }
-          const paymentInfo = getDocumentInfo(paymentResponse, 'pago');
-          paymentInfos.push({
-            paymentMethodCode: payment.paymentMethodCode,
-            cashAccount: payment.cashAccount,
-            amount: roundMoney(payment.amount),
-            paymentDocEntry: paymentInfo.docEntry,
-            paymentDocNum: paymentInfo.docNum
-          });
         }
 
         processedTickets += 1;
