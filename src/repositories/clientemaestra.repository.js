@@ -24,7 +24,7 @@ function mapClientRow(row) {
     ds_nombre: toStringSafe(row.ds_nombre, 200),
     ds_telefono: toStringSafe(row.ds_telefono, 10),
     ds_celular: toStringSafe(row.ds_celular, 10),
-    ds_email: toStringSafe(row.ds_email, 100)
+    ds_email: toStringSafe(row.ds_emailcliente, 100)
   };
 }
 
