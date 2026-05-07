@@ -24,7 +24,7 @@ function mapClientRow(row) {
     ds_nombre: toStringSafe(row.ds_nombre, 200),
     ds_telefono: toStringSafe(row.ds_telefono, 10),
     ds_celular: toStringSafe(row.ds_celular, 10),
-    ds_email: toStringSafe(row.ds_emailcliente, 100)
+    ds_emailcliente: toStringSafe(row.ds_emailcliente, 100)
   };
 }
 
@@ -120,7 +120,7 @@ async function createStageTable(tx, stageTable) {
       ds_nombre VARCHAR(200) NOT NULL,
       ds_telefono VARCHAR(10) NOT NULL,
       ds_celular VARCHAR(10) NOT NULL,
-      ds_email VARCHAR(100) NOT NULL
+      ds_emailcliente VARCHAR(100) NOT NULL
     );
   `);
 }
@@ -135,14 +135,14 @@ async function insertStageRows(tx, rows, stageTable) {
       req.input(`ds_nombre_${index}`, sql.VarChar(200), row.ds_nombre);
       req.input(`ds_telefono_${index}`, sql.VarChar(10), row.ds_telefono);
       req.input(`ds_celular_${index}`, sql.VarChar(10), row.ds_celular);
-      req.input(`ds_email_${index}`, sql.VarChar(100), row.ds_email);
+      req.input(`ds_emailcliente_${index}`, sql.VarChar(100), row.ds_emailcliente);
 
       return `(
         @cd_codigodocumento_${index},
         @ds_nombre_${index},
         @ds_telefono_${index},
         @ds_celular_${index},
-        @ds_email_${index}
+        @ds_emailcliente_${index}
       )`;
     }).join(',\n');
 
@@ -153,7 +153,7 @@ async function insertStageRows(tx, rows, stageTable) {
         ds_nombre,
         ds_telefono,
         ds_celular,
-        ds_email
+        ds_emailcliente
       )
       VALUES
       ${valuesSql};
@@ -174,7 +174,7 @@ async function updateExistingRows(tx, target, stageTable) {
       target.ds_nombre = stage.ds_nombre,
       target.ds_telefono = stage.ds_telefono,
       target.ds_celular = stage.ds_celular,
-      target.ds_email = stage.ds_email
+      target.ds_emailcliente = stage.ds_emailcliente
     FROM ${target} AS target
     INNER JOIN ${stageTable} AS stage
       ON stage.cd_codigodocumento = target.cd_codigodocumento;
@@ -194,14 +194,14 @@ async function insertMissingRows(tx, target, stageTable) {
       ds_nombre,
       ds_telefono,
       ds_celular,
-      ds_email
+      ds_emailcliente
     )
     SELECT
       stage.cd_codigodocumento,
       stage.ds_nombre,
       stage.ds_telefono,
       stage.ds_celular,
-      stage.ds_email
+      stage.ds_emailcliente
     FROM ${stageTable} AS stage
     LEFT JOIN ${target} AS target
       ON target.cd_codigodocumento = stage.cd_codigodocumento
