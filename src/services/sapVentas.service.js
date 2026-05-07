@@ -2,6 +2,27 @@ const axios = require('axios');
 const { sap, app } = require('../config/env');
 const { buildHttpsAgent } = require('./sapAuth.service');
 
+const DEFAULT_BP_ADDRESSES = [
+  {
+    AddressName: 'Principal',
+    Street: 'Calle 123 #45-67',
+    City: 'Bogota',
+    County: 'Cundinamarca',
+    Country: 'CO',
+    ZipCode: '110111',
+    AddressType: 'bo_BillTo'
+  },
+  {
+    AddressName: 'Entrega',
+    Street: 'Cra 10 #20-30',
+    City: 'Bogota',
+    County: 'Cundinamarca',
+    Country: 'CO',
+    ZipCode: '110111',
+    AddressType: 'bo_ShipTo'
+  }
+];
+
 async function validateBusinessPartnerExists(ticket, cookieHeader) {
   const encodedCardCode = encodeURIComponent(ticket.cardCode);
   const url = `${sap.baseUrl}${sap.businessPartnersPath}('${encodedCardCode}')`;
@@ -25,6 +46,15 @@ async function validateBusinessPartnerExists(ticket, cookieHeader) {
   }
 
   return response.data;
+}
+
+async function createBusinessPartner(salesClient, cookieHeader) {
+  const payload = buildBusinessPartnerPayload(salesClient);
+  try {
+    return await postToSap(sap.businessPartnersPath, payload, cookieHeader, `BusinessPartner ${salesClient.cardCode}`);
+  } catch (error) {
+    throw new Error(`${error.message} | payload=${JSON.stringify(payload)}`);
+  }
 }
 
 async function createInvoice(ticket, cookieHeader) {
@@ -94,6 +124,32 @@ async function postCommercialDocument(path, payload, cookieHeader, label) {
 
 function buildInvoicePayload(ticket) {
   return buildCommercialDocumentPayload(ticket, app.salesInvoiceSeries);
+}
+
+function buildBusinessPartnerPayload(salesClient) {
+  validateSalesClient(salesClient);
+
+  return {
+    CardCode: salesClient.cardCode,
+    CardName: salesClient.cardName,
+    CardType: 'cCustomer',
+    GroupCode: 100,
+    FederalTaxID: salesClient.cardCode,
+    Phone1: salesClient.phone,
+    Cellular: salesClient.cellular,
+    EmailAddress: salesClient.email,
+    U_HBT_MailRecep_FE: salesClient.email,
+    U_HBT_RegTrib: salesClient.regTrib,
+    U_HBT_TipDoc: salesClient.tipDoc,
+    U_HBT_RegFis: salesClient.regFis,
+    U_HBT_ActEco: '0010',
+    U_HBT_MunMed: salesClient.cityCode,
+    U_HBT_TipEnt: salesClient.tipEnt,
+    U_HBT_ResFis: 'R-99-PN',
+    U_HBT_MedPag: '1',
+    U_HBT_Residente: 'SI',
+    BPAddresses: DEFAULT_BP_ADDRESSES
+  };
 }
 
 function buildCommercialDocumentPayload(ticket, series) {
@@ -201,6 +257,18 @@ function validateTicket(ticket) {
   }
 }
 
+function validateSalesClient(salesClient) {
+  if (!salesClient || !salesClient.cardCode) {
+    throw new Error('Cliente de ventas sin cd_codigocliente');
+  }
+  if (!salesClient.cardName) {
+    throw new Error(`El cliente ${salesClient.cardCode} no tiene ds_nombrecliente`);
+  }
+  if (!salesClient.email) {
+    throw new Error(`El cliente ${salesClient.cardCode} no tiene ds_emailcliente`);
+  }
+}
+
 function getDocEntry(response, entityName) {
   const docEntry = response?.DocEntry;
   if (docEntry === undefined || docEntry === null) {
@@ -284,6 +352,7 @@ function calculatePositiveLineNet(line) {
 
 module.exports = {
   validateBusinessPartnerExists,
+  createBusinessPartner,
   createInvoice,
   createCreditNote,
   createIncomingPayment,

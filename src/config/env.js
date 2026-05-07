@@ -53,6 +53,7 @@ module.exports = {
     itemTable: process.env.ITEM_TABLE || 'articulomaestra',
     stockTable: process.env.STOCK_TABLE || 'stockarticulos',
     clientTable: process.env.CLIENT_TABLE || 'clientemaestra',
+    salesClientsTable: process.env.SALES_CLIENTS_TABLE || 'CLIENTES',
     salesInvoiceEventType: process.env.SALES_INVOICE_EVENT_TYPE || '0',
     salesCreditNoteEventType: process.env.SALES_CREDIT_NOTE_EVENT_TYPE || '21',
     salesInvoiceSeries: Number(process.env.SALES_INVOICE_SERIES || 115),

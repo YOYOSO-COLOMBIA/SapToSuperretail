@@ -6,9 +6,11 @@ const { upsertClienteMaestra } = require('../repositories/clientemaestra.reposit
 const { upsertStockArticulos } = require('../repositories/santastock.repository');
 const { getVentasTickets, buildRelaxedTicketKey } = require('../repositories/ventas.repository');
 const { getMediosPagoTickets } = require('../repositories/mediospagos.repository');
+const { getSalesClientsByCodes, markSalesClientAsSent } = require('../repositories/salesclients.repository');
 const { insertLog } = require('../repositories/log.repository');
 const {
   validateBusinessPartnerExists,
+  createBusinessPartner,
   createInvoice,
   createCreditNote,
   createIncomingPaymentForMethod,
@@ -154,27 +156,31 @@ async function runSync(options = {}) {
     }
 
     if (mode === 'ventas') {
-      const { tickets, mediosPagoTickets } = await executeTransaction(async (tx) => {
+      const { tickets, mediosPagoTickets, salesClientsByCode } = await executeTransaction(async (tx) => {
         const ventas = await getVentasTickets(tx);
         const medios = await getMediosPagoTickets(tx);
+        const salesClients = await getSalesClientsByCodes(tx, ventas.map((ticket) => ticket.cardCode));
 
         return {
           tickets: ventas,
-          mediosPagoTickets: medios
+          mediosPagoTickets: medios,
+          salesClientsByCode: salesClients
         };
       });
 
       const mediosPagoIndex = indexMediosPagoTickets(mediosPagoTickets);
+      const salesClientsCache = new Map(salesClientsByCode);
       let processedTickets = 0;
       let processedLines = 0;
       const documents = [];
 
       for (const ticket of tickets) {
+        const salesClient = salesClientsCache.get(ticket.cardCode);
+        await ensureSalesClientReady(ticket, salesClient, salesClientsCache, cookieHeader);
+
         const mediosPago = resolveTicketPayments(ticket, mediosPagoIndex);
         const salesContext = resolveSalesDocumentContext(ticket, mediosPago);
         validatePaymentsAgainstInvoice(salesContext.ticket, mediosPago);
-
-        await validateBusinessPartnerExists(salesContext.ticket, cookieHeader);
 
         const documentResponse = await createSalesDocument(salesContext.ticket, cookieHeader);
         const documentInfo = getDocumentInfo(documentResponse, salesContext.entityLabel);
@@ -405,4 +411,24 @@ async function createSalesDocument(ticket, cookieHeader) {
   }
 
   return createInvoice(ticket, cookieHeader);
+}
+
+async function ensureSalesClientReady(ticket, salesClient, salesClientsCache, cookieHeader) {
+  if (!salesClient) {
+    throw new Error(`El cliente ${ticket.cardCode} del ticket ${ticket.ticketKey} no existe en YOYOSO.CLIENTES.`);
+  }
+
+  if (Number(salesClient.status) === 1) {
+    await createBusinessPartner(salesClient, cookieHeader);
+    await executeTransaction(async (tx) => {
+      await markSalesClientAsSent(tx, salesClient.cardCode);
+    });
+    salesClientsCache.set(salesClient.cardCode, {
+      ...salesClient,
+      status: 0
+    });
+    return;
+  }
+
+  await validateBusinessPartnerExists(ticket, cookieHeader);
 }
