@@ -4,7 +4,7 @@ const { executeTransaction } = require('./sql.service');
 const { upsertArticuloMaestra } = require('../repositories/santaitem.repository');
 const { upsertClienteMaestra } = require('../repositories/clientemaestra.repository');
 const { upsertStockArticulos } = require('../repositories/santastock.repository');
-const { getVentasTickets, buildRelaxedTicketKey } = require('../repositories/ventas.repository');
+const { getVentasTickets, buildRelaxedTicketKey, markVentasTicketStatus } = require('../repositories/ventas.repository');
 const { getMediosPagoTickets } = require('../repositories/mediospagos.repository');
 const { getSalesClientsByCodes, markSalesClientAsSent } = require('../repositories/salesclients.repository');
 const { insertLog } = require('../repositories/log.repository');
@@ -175,52 +175,65 @@ async function runSync(options = {}) {
       const documents = [];
 
       for (const ticket of tickets) {
-        const salesClient = salesClientsCache.get(ticket.cardCode);
-        await ensureSalesClientReady(ticket, salesClient, salesClientsCache, cookieHeader);
+        try {
+          const salesClient = salesClientsCache.get(ticket.cardCode);
+          await ensureSalesClientReady(ticket, salesClient, salesClientsCache, cookieHeader);
 
-        const mediosPago = resolveTicketPayments(ticket, mediosPagoIndex);
-        const salesContext = resolveSalesDocumentContext(ticket, mediosPago);
-        validatePaymentsAgainstInvoice(salesContext.ticket, mediosPago);
+          const mediosPago = resolveTicketPayments(ticket, mediosPagoIndex);
+          const salesContext = resolveSalesDocumentContext(ticket, mediosPago);
+          validatePaymentsAgainstInvoice(salesContext.ticket, mediosPago);
 
-        const documentResponse = await createSalesDocument(salesContext.ticket, cookieHeader);
-        const documentInfo = getDocumentInfo(documentResponse, salesContext.entityLabel);
+          const documentResponse = await createSalesDocument(salesContext.ticket, cookieHeader);
+          const documentInfo = getDocumentInfo(documentResponse, salesContext.entityLabel);
 
-        const paymentInfos = [];
-        if (salesContext.documentType !== 'credit-note') {
-          for (const payment of mediosPago.payments) {
-            let paymentResponse;
-            try {
-              paymentResponse = await createIncomingPaymentForMethod(salesContext.ticket, payment, documentInfo.docEntry, cookieHeader);
-            } catch (error) {
-              throw new Error(
-                `${error.message} | documentDocEntry=${documentInfo.docEntry} | documentDocNum=${documentInfo.docNum ?? 'null'} | documentDocTotal=${documentInfo.docTotal ?? 'null'} | documentPayload=${JSON.stringify(documentInfo.debug?.payload || null)} | documentResponse=${JSON.stringify(documentInfo.responseData || null)}`
-              );
+          const paymentInfos = [];
+          if (salesContext.documentType !== 'credit-note') {
+            for (const payment of mediosPago.payments) {
+              let paymentResponse;
+              try {
+                paymentResponse = await createIncomingPaymentForMethod(salesContext.ticket, payment, documentInfo.docEntry, cookieHeader);
+              } catch (error) {
+                throw new Error(
+                  `${error.message} | documentDocEntry=${documentInfo.docEntry} | documentDocNum=${documentInfo.docNum ?? 'null'} | documentDocTotal=${documentInfo.docTotal ?? 'null'} | documentPayload=${JSON.stringify(documentInfo.debug?.payload || null)} | documentResponse=${JSON.stringify(documentInfo.responseData || null)}`
+                );
+              }
+              const paymentInfo = getDocumentInfo(paymentResponse, 'pago');
+              paymentInfos.push({
+                paymentMethodCode: payment.paymentMethodCode,
+                cashAccount: payment.cashAccount,
+                amount: roundMoney(payment.amount),
+                paymentDocEntry: paymentInfo.docEntry,
+                paymentDocNum: paymentInfo.docNum
+              });
             }
-            const paymentInfo = getDocumentInfo(paymentResponse, 'pago');
-            paymentInfos.push({
-              paymentMethodCode: payment.paymentMethodCode,
-              cashAccount: payment.cashAccount,
-              amount: roundMoney(payment.amount),
-              paymentDocEntry: paymentInfo.docEntry,
-              paymentDocNum: paymentInfo.docNum
-            });
           }
-        }
 
-        processedTickets += 1;
-        processedLines += salesContext.ticket.lines.length;
-        documents.push({
-          ticketKey: salesContext.ticket.ticketKey,
-          cardCode: salesContext.ticket.cardCode,
-          documentType: salesContext.documentType,
-          eventType: salesContext.ticket.eventType,
-          documentDocEntry: documentInfo.docEntry,
-          documentDocNum: documentInfo.docNum,
-          documentDocTotal: documentInfo.docTotal,
-          documentPayload: documentInfo.debug?.payload || null,
-          documentResponse: documentInfo.responseData || null,
-          payments: paymentInfos
-        });
+          validateCompletedSalesTicket(ticket, salesContext, documentInfo, paymentInfos);
+
+          await executeTransaction(async (tx) => {
+            await markVentasTicketStatus(tx, ticket, 0);
+          });
+
+          processedTickets += 1;
+          processedLines += salesContext.ticket.lines.length;
+          documents.push({
+            ticketKey: salesContext.ticket.ticketKey,
+            cardCode: salesContext.ticket.cardCode,
+            documentType: salesContext.documentType,
+            eventType: salesContext.ticket.eventType,
+            documentDocEntry: documentInfo.docEntry,
+            documentDocNum: documentInfo.docNum,
+            documentDocTotal: documentInfo.docTotal,
+            documentPayload: documentInfo.debug?.payload || null,
+            documentResponse: documentInfo.responseData || null,
+            payments: paymentInfos
+          });
+        } catch (error) {
+          await executeTransaction(async (tx) => {
+            await markVentasTicketStatus(tx, ticket, 1);
+          });
+          throw error;
+        }
       }
 
       await executeTransaction(async (tx) => {
@@ -431,4 +444,23 @@ async function ensureSalesClientReady(ticket, salesClient, salesClientsCache, co
   }
 
   await validateBusinessPartnerExists(ticket, cookieHeader);
+}
+
+function validateCompletedSalesTicket(ticket, salesContext, documentInfo, paymentInfos) {
+  if (!documentInfo.docNum) {
+    throw new Error(`El ticket ${ticket.ticketKey} no devolvio DocNum en SAP para ${salesContext.documentType}.`);
+  }
+
+  if (salesContext.documentType === 'credit-note') {
+    return;
+  }
+
+  if (paymentInfos.length === 0) {
+    throw new Error(`El ticket ${ticket.ticketKey} no genero pagos para la factura ${documentInfo.docNum}.`);
+  }
+
+  const missingPaymentDocNum = paymentInfos.find((payment) => !payment.paymentDocNum);
+  if (missingPaymentDocNum) {
+    throw new Error(`El ticket ${ticket.ticketKey} tiene un pago sin DocNum SAP para el medio ${missingPaymentDocNum.paymentMethodCode || 'NA'}.`);
+  }
 }
