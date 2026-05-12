@@ -38,7 +38,10 @@ async function validateBusinessPartnerExists(ticket, cookieHeader) {
   });
 
   if (response.status === 404) {
-    throw new Error(`El cliente ${ticket.cardCode} no existe en SAP. Esta fase solo procesa clientes existentes.`);
+    const error = new Error(`El cliente ${ticket.cardCode} no existe en SAP.`);
+    error.sapStatus = 404;
+    error.businessPartnerMissing = true;
+    throw error;
   }
 
   if (response.status < 200 || response.status >= 300) {
@@ -46,6 +49,10 @@ async function validateBusinessPartnerExists(ticket, cookieHeader) {
   }
 
   return response.data;
+}
+
+function isBusinessPartnerMissingError(error) {
+  return Boolean(error?.businessPartnerMissing) || Number(error?.sapStatus) === 404;
 }
 
 async function createBusinessPartner(salesClient, cookieHeader) {
@@ -352,6 +359,7 @@ function calculatePositiveLineNet(line) {
 
 module.exports = {
   validateBusinessPartnerExists,
+  isBusinessPartnerMissingError,
   createBusinessPartner,
   createInvoice,
   createCreditNote,

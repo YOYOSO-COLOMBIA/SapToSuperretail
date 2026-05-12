@@ -10,6 +10,7 @@ const { getSalesClientsByCodes, markSalesClientAsSent } = require('../repositori
 const { insertLog } = require('../repositories/log.repository');
 const {
   validateBusinessPartnerExists,
+  isBusinessPartnerMissingError,
   createBusinessPartner,
   createInvoice,
   createCreditNote,
@@ -432,7 +433,22 @@ async function ensureSalesClientReady(ticket, salesClient, salesClientsCache, co
     return;
   }
 
-  await validateBusinessPartnerExists(ticket, cookieHeader);
+  try {
+    await validateBusinessPartnerExists(ticket, cookieHeader);
+  } catch (error) {
+    if (!isBusinessPartnerMissingError(error)) {
+      throw error;
+    }
+
+    await createBusinessPartner(salesClient, cookieHeader);
+    await executeTransaction(async (tx) => {
+      await markSalesClientAsSent(tx, salesClient.cardCode);
+    });
+    salesClientsCache.set(salesClient.cardCode, {
+      ...salesClient,
+      status: 0
+    });
+  }
 }
 
 function validateCompletedSalesTicket(ticket, salesContext, documentInfo, paymentInfos) {
