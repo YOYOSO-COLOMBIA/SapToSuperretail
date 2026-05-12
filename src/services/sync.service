@@ -421,17 +421,7 @@ async function ensureSalesClientReady(ticket, salesClient, salesClientsCache, co
     throw new Error(`El cliente ${ticket.cardCode} del ticket ${ticket.ticketKey} no existe en YOYOSO.CLIENTES.`);
   }
 
-  if (Number(salesClient.status) === 1) {
-    await createBusinessPartner(salesClient, cookieHeader);
-    await executeTransaction(async (tx) => {
-      await markSalesClientAsSent(tx, salesClient.cardCode);
-    });
-    salesClientsCache.set(salesClient.cardCode, {
-      ...salesClient,
-      status: 0
-    });
-    return;
-  }
+  let createdInSap = false;
 
   try {
     await validateBusinessPartnerExists(ticket, cookieHeader);
@@ -441,6 +431,17 @@ async function ensureSalesClientReady(ticket, salesClient, salesClientsCache, co
     }
 
     await createBusinessPartner(salesClient, cookieHeader);
+    createdInSap = true;
+    await executeTransaction(async (tx) => {
+      await markSalesClientAsSent(tx, salesClient.cardCode);
+    });
+    salesClientsCache.set(salesClient.cardCode, {
+      ...salesClient,
+      status: 0
+    });
+  }
+
+  if (!createdInSap && Number(salesClient.status) === 1) {
     await executeTransaction(async (tx) => {
       await markSalesClientAsSent(tx, salesClient.cardCode);
     });
