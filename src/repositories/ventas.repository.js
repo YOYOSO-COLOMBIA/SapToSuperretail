@@ -1,4 +1,4 @@
-const { createRequest, tableName, sql } = require('../services/sql.service');
+const { createRequest, tableName } = require('../services/sql.service');
 const { app } = require('../config/env');
 
 function ventasTableName() {
@@ -24,7 +24,6 @@ async function getVentasTickets(tx) {
       [cd_centrocosto],
       [cd_subcentrocosto]
     FROM ${ventasTableName()}
-    WHERE [ds_estado] = 1
     ORDER BY
       [dt_diaoperativo],
       [cd_codigotienda],
@@ -34,28 +33,6 @@ async function getVentasTickets(tx) {
   `);
 
   return groupRowsByTicket(result.recordset || []);
-}
-
-async function markVentasTicketStatus(tx, ticket, status) {
-  const req = createRequest(tx);
-  req.input('cardCode', sql.VarChar(20), cleanValue(ticket.cardCode));
-  req.input('docDate', sql.Date, toSqlDate(ticket.docDate));
-  req.input('eventType', sql.VarChar(3), cleanValue(ticket.eventType));
-  req.input('storeCode', sql.VarChar(8), cleanValue(ticket.storeCode));
-  req.input('cashRegisterCode', sql.VarChar(6), cleanValue(ticket.cashRegisterCode));
-  req.input('ticketNumber', sql.VarChar(12), cleanValue(ticket.ticketNumber));
-  req.input('status', sql.Int, Number(status));
-
-  await req.query(`
-    UPDATE ${ventasTableName()}
-    SET [ds_estado] = @status
-    WHERE [cd_codigocliente] = @cardCode
-      AND CAST([dt_diaoperativo] AS date) = @docDate
-      AND [ds_tipoevento] = @eventType
-      AND [cd_codigotienda] = @storeCode
-      AND [cd_codigocaja] = @cashRegisterCode
-      AND [ds_numerotiquete] = @ticketNumber;
-  `);
 }
 
 function groupRowsByTicket(rows) {
@@ -157,6 +134,5 @@ function toSqlDate(value) {
 
 module.exports = {
   getVentasTickets,
-  buildRelaxedTicketKey,
-  markVentasTicketStatus
+  buildRelaxedTicketKey
 };
