@@ -2,26 +2,39 @@ const axios = require('axios');
 const { sap, app } = require('../config/env');
 const { buildHttpsAgent } = require('./sapAuth.service');
 
-const DEFAULT_BP_ADDRESSES = [
-  {
-    AddressName: 'Principal',
-    Street: 'Calle 123 #45-67',
-    City: 'Bogota',
-    County: 'Cundinamarca',
-    Country: 'CO',
-    ZipCode: '110111',
-    AddressType: 'bo_BillTo'
+const STORE_EMAILS = {
+  15: 'managerunicentro@yoyoso.co',
+  16: 'managereden@yoyoso.co',
+  17: 'managerzonat@yoyoso.co',
+  47: 'managerplazadelparque@yoyoso.co'
+};
+
+const STORE_ADDRESSES = {
+  15: {
+    street: 'Cra 15 124 30',
+    zipCode: '111011',
+    city: 'BOGOTA',
+    country: 'CO'
   },
-  {
-    AddressName: 'Entrega',
-    Street: 'Cra 10 #20-30',
-    City: 'Bogota',
-    County: 'Cundinamarca',
-    Country: 'CO',
-    ZipCode: '110111',
-    AddressType: 'bo_ShipTo'
+  16: {
+    street: 'Cra 72 12b Esquina',
+    zipCode: '111011',
+    city: 'BOGOTA',
+    country: 'CO'
+  },
+  17: {
+    street: 'Cra 12A 83 77',
+    zipCode: '111011',
+    city: 'BOGOTA',
+    country: 'CO'
+  },
+  47: {
+    street: 'CLL 99 53 40',
+    zipCode: '080001',
+    city: 'BARRANQUILLA',
+    country: 'CO'
   }
-];
+};
 
 async function validateBusinessPartnerExists(ticket, cookieHeader) {
   const encodedCardCode = encodeURIComponent(ticket.cardCode);
@@ -55,8 +68,8 @@ function isBusinessPartnerMissingError(error) {
   return Boolean(error?.businessPartnerMissing) || Number(error?.sapStatus) === 404;
 }
 
-async function createBusinessPartner(salesClient, cookieHeader) {
-  const payload = buildBusinessPartnerPayload(salesClient);
+async function createBusinessPartner(salesClient, ticket, cookieHeader) {
+  const payload = buildBusinessPartnerPayload(salesClient, ticket);
   try {
     return await postToSap(sap.businessPartnersPath, payload, cookieHeader, `BusinessPartner ${salesClient.cardCode}`);
   } catch (error) {
@@ -133,7 +146,9 @@ function buildInvoicePayload(ticket) {
   return buildCommercialDocumentPayload(ticket, app.salesInvoiceSeries);
 }
 
-function buildBusinessPartnerPayload(salesClient) {
+function buildBusinessPartnerPayload(salesClient, ticket) {
+  const email = resolveBusinessPartnerEmail(salesClient, ticket);
+  const addresses = buildBusinessPartnerAddresses(ticket);
   validateSalesClient(salesClient);
 
   return {
@@ -144,8 +159,8 @@ function buildBusinessPartnerPayload(salesClient) {
     FederalTaxID: salesClient.cardCode,
     Phone1: salesClient.phone,
     Cellular: salesClient.cellular,
-    EmailAddress: salesClient.email,
-    U_HBT_MailRecep_FE: salesClient.email,
+    EmailAddress: email,
+    U_HBT_MailRecep_FE: email,
     U_HBT_RegTrib: salesClient.regTrib,
     U_HBT_TipDoc: salesClient.tipDoc,
     U_HBT_RegFis: salesClient.regFis,
@@ -155,8 +170,62 @@ function buildBusinessPartnerPayload(salesClient) {
     U_HBT_ResFis: 'R-99-PN',
     U_HBT_MedPag: '1',
     U_HBT_Residente: 'SI',
-    BPAddresses: DEFAULT_BP_ADDRESSES
+    BPAddresses: addresses
   };
+}
+
+function resolveBusinessPartnerEmail(salesClient, ticket) {
+  if (salesClient?.email) {
+    return salesClient.email;
+  }
+
+  const storeCode = normalizeStoreCode(ticket?.storeCode);
+  const storeEmail = STORE_EMAILS[storeCode];
+  if (storeEmail) {
+    return storeEmail;
+  }
+
+  throw new Error(`El cliente ${salesClient?.cardCode || ticket?.cardCode} no tiene ds_emailcliente y la tienda ${ticket?.storeCode || 'sin codigo'} no tiene correo configurado.`);
+}
+
+function buildBusinessPartnerAddresses(ticket) {
+  const storeCode = normalizeStoreCode(ticket?.storeCode);
+  const address = STORE_ADDRESSES[storeCode];
+  if (!address) {
+    throw new Error(`La tienda ${ticket?.storeCode || 'sin codigo'} no tiene direccion configurada para BPAddresses.`);
+  }
+
+  return [
+    {
+      AddressName: 'PRINCIPAL',
+      Street: address.street,
+      ZipCode: address.zipCode,
+      City: address.city,
+      Country: address.country,
+      AddressType: 'bo_BillTo',
+      U_HBT_MunMed: address.zipCode,
+      U_HBT_DirMM: 'Y'
+    },
+    {
+      AddressName: 'SECUNDARIA',
+      Street: address.street,
+      ZipCode: address.zipCode,
+      City: address.city,
+      Country: address.country,
+      AddressType: 'bo_ShipTo',
+      U_HBT_MunMed: address.zipCode,
+      U_HBT_DirMM: 'N'
+    }
+  ];
+}
+
+function normalizeStoreCode(value) {
+  const text = String(value || '').trim();
+  if (/^\d+$/.test(text)) {
+    return String(Number(text));
+  }
+
+  return text;
 }
 
 function buildCommercialDocumentPayload(ticket, series) {
@@ -270,9 +339,6 @@ function validateSalesClient(salesClient) {
   }
   if (!salesClient.cardName) {
     throw new Error(`El cliente ${salesClient.cardCode} no tiene ds_nombrecliente`);
-  }
-  if (!salesClient.email) {
-    throw new Error(`El cliente ${salesClient.cardCode} no tiene ds_emailcliente`);
   }
 }
 

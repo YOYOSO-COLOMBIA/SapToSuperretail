@@ -430,7 +430,7 @@ async function ensureSalesClientReady(ticket, salesClient, salesClientsCache, co
       throw error;
     }
 
-    await createBusinessPartner(salesClient, cookieHeader);
+    await createBusinessPartner(salesClient, ticket, cookieHeader);
     createdInSap = true;
     await executeTransaction(async (tx) => {
       await markSalesClientAsSent(tx, salesClient.cardCode);
