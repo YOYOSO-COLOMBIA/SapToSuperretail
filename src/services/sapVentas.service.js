@@ -36,6 +36,8 @@ const STORE_ADDRESSES = {
   }
 };
 
+const MERCHANDISE_EXCHANGE_ACCOUNT = '28050503';
+
 async function validateBusinessPartnerExists(ticket, cookieHeader) {
   const encodedCardCode = encodeURIComponent(ticket.cardCode);
   const url = `${sap.baseUrl}${sap.businessPartnersPath}('${encodedCardCode}')`;
@@ -174,6 +176,26 @@ function buildBusinessPartnerPayload(salesClient, ticket) {
   };
 }
 
+async function createVendorPaymentForCreditNote(ticket, amount, creditNoteDocEntry, creditNoteDocNum, cookieHeader) {
+  const payload = buildCreditNoteVendorPaymentPayload(ticket, amount, creditNoteDocEntry, creditNoteDocNum);
+  try {
+    return await postToSap('/b1s/v1/VendorPayments', payload, cookieHeader, `VendorPayment ${ticket.ticketKey}`);
+  } catch (error) {
+    throw new Error(`${error.message} | payload=${JSON.stringify(payload)}`);
+  }
+}
+
+async function createIncomingPaymentForExchangeCredit(ticket, amount, invoiceDocEntry, creditNoteDocNum, cookieHeader) {
+  const payment = {
+    paymentMethodCode: 'VAB-NC',
+    cashAccount: MERCHANDISE_EXCHANGE_ACCOUNT,
+    amount,
+    journalRemarks: `Pago recibido por NC ${creditNoteDocNum || ticket.ticketNumber} a cuenta ${MERCHANDISE_EXCHANGE_ACCOUNT}`
+  };
+
+  return createIncomingPaymentForMethod(ticket, payment, invoiceDocEntry, cookieHeader);
+}
+
 function resolveBusinessPartnerEmail(salesClient, ticket) {
   if (salesClient?.email) {
     return salesClient.email;
@@ -277,10 +299,12 @@ function buildIncomingPaymentPayloadForMethod(ticket, payment, invoiceDocEntry) 
   }
 
   return {
+    DocType: 'rCustomer',
     CardCode: ticket.cardCode,
     DocDate: ticket.docDate,
-    DueDate: ticket.docDate,
     TaxDate: ticket.docDate,
+    ...(payment.journalRemarks ? { JournalRemarks: payment.journalRemarks } : {}),
+    DocCurrency: '$',
     CashAccount: payment.cashAccount,
     CashSum: amount,
     PaymentInvoices: [
@@ -288,6 +312,31 @@ function buildIncomingPaymentPayloadForMethod(ticket, payment, invoiceDocEntry) 
         DocEntry: invoiceDocEntry,
         SumApplied: amount,
         InvoiceType: resolvePaymentInvoiceType(ticket.documentType)
+      }
+    ]
+  };
+}
+
+function buildCreditNoteVendorPaymentPayload(ticket, amount, creditNoteDocEntry, creditNoteDocNum) {
+  const paymentAmount = roundMoney(amount);
+  if (!(paymentAmount > 0)) {
+    throw new Error(`El ticket ${ticket.ticketKey} tiene valor invalido para pago efectuado de nota credito`);
+  }
+
+  return {
+    DocType: 'rCustomer',
+    CardCode: ticket.cardCode,
+    DocDate: ticket.docDate,
+    TaxDate: ticket.docDate,
+    JournalRemarks: `Pago efectuado por NC ${creditNoteDocNum || ticket.ticketNumber} a cuenta ${MERCHANDISE_EXCHANGE_ACCOUNT}`,
+    DocCurrency: '$',
+    CashAccount: MERCHANDISE_EXCHANGE_ACCOUNT,
+    CashSum: paymentAmount,
+    PaymentInvoices: [
+      {
+        DocEntry: creditNoteDocEntry,
+        SumApplied: paymentAmount,
+        InvoiceType: 'it_CredItnote'
       }
     ]
   };
@@ -431,6 +480,8 @@ module.exports = {
   createCreditNote,
   createIncomingPayment,
   createIncomingPaymentForMethod,
+  createVendorPaymentForCreditNote,
+  createIncomingPaymentForExchangeCredit,
   getDocEntry,
   getDocumentInfo,
   roundMoney,

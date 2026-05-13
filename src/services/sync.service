@@ -15,6 +15,8 @@ const {
   createInvoice,
   createCreditNote,
   createIncomingPaymentForMethod,
+  createVendorPaymentForCreditNote,
+  createIncomingPaymentForExchangeCredit,
   getDocumentInfo,
   roundMoney,
   calculateExpectedInvoiceTotal
@@ -178,6 +180,14 @@ async function runSync(options = {}) {
       for (const ticket of tickets) {
         const salesClient = salesClientsCache.get(ticket.cardCode);
         await ensureSalesClientReady(ticket, salesClient, salesClientsCache, cookieHeader);
+
+        if (isMerchandiseExchangeTicket(ticket)) {
+          const exchangeResult = await processMerchandiseExchangeTicket(ticket, mediosPagoIndex, cookieHeader);
+          processedTickets += 1;
+          processedLines += ticket.lines.length;
+          documents.push(exchangeResult);
+          continue;
+        }
 
         const mediosPago = resolveTicketPayments(ticket, mediosPagoIndex);
         const salesContext = resolveSalesDocumentContext(ticket, mediosPago);
@@ -374,6 +384,176 @@ function validatePaymentsAgainstInvoice(ticket, mediosPago) {
       })}`
     );
   }
+}
+
+async function processMerchandiseExchangeTicket(ticket, mediosPagoIndex, cookieHeader) {
+  const { creditNoteTicket, invoiceTicket } = splitMerchandiseExchangeTicket(ticket);
+
+  const creditNoteResponse = await createCreditNote(creditNoteTicket, cookieHeader);
+  const creditNoteInfo = getDocumentInfo(creditNoteResponse, 'nota credito cambio mercancia');
+  const creditNoteTotal = resolveDocumentTotal(creditNoteInfo, creditNoteTicket);
+
+  const vendorPaymentResponse = await createVendorPaymentForCreditNote(
+    creditNoteTicket,
+    creditNoteTotal,
+    creditNoteInfo.docEntry,
+    creditNoteInfo.docNum,
+    cookieHeader
+  );
+  const vendorPaymentInfo = getDocumentInfo(vendorPaymentResponse, 'pago efectuado nota credito');
+
+  const invoiceResponse = await createInvoice(invoiceTicket, cookieHeader);
+  const invoiceInfo = getDocumentInfo(invoiceResponse, 'factura cambio mercancia');
+  const invoiceTotal = resolveDocumentTotal(invoiceInfo, invoiceTicket);
+  const creditAppliedToInvoice = roundMoney(Math.min(creditNoteTotal, invoiceTotal));
+
+  const paymentInfos = [];
+  if (creditAppliedToInvoice > 0) {
+    const creditPaymentResponse = await createIncomingPaymentForExchangeCredit(
+      invoiceTicket,
+      creditAppliedToInvoice,
+      invoiceInfo.docEntry,
+      creditNoteInfo.docNum,
+      cookieHeader
+    );
+    const creditPaymentInfo = getDocumentInfo(creditPaymentResponse, 'pago recibido nota credito');
+    paymentInfos.push({
+      paymentMethodCode: 'VAB-NC',
+      cashAccount: '28050503',
+      amount: creditAppliedToInvoice,
+      paymentDocEntry: creditPaymentInfo.docEntry,
+      paymentDocNum: creditPaymentInfo.docNum
+    });
+  }
+
+  const excessAmount = roundMoney(invoiceTotal - creditAppliedToInvoice);
+  if (excessAmount > 0.1) {
+    const mediosPago = resolveTicketPayments(ticket, mediosPagoIndex);
+    const excessPayments = selectPaymentsForAmount(ticket, mediosPago.payments, excessAmount);
+
+    for (const payment of excessPayments) {
+      const paymentResponse = await createIncomingPaymentForMethod(invoiceTicket, payment, invoiceInfo.docEntry, cookieHeader);
+      const paymentInfo = getDocumentInfo(paymentResponse, 'pago recibido excedente');
+      paymentInfos.push({
+        paymentMethodCode: payment.paymentMethodCode,
+        cashAccount: payment.cashAccount,
+        amount: roundMoney(payment.amount),
+        paymentDocEntry: paymentInfo.docEntry,
+        paymentDocNum: paymentInfo.docNum
+      });
+    }
+  }
+
+  validateCompletedSalesTicket(invoiceTicket, { documentType: 'invoice' }, invoiceInfo, paymentInfos);
+
+  return {
+    ticketKey: ticket.ticketKey,
+    cardCode: ticket.cardCode,
+    documentType: 'merchandise-exchange',
+    eventType: ticket.eventType,
+    creditNoteDocEntry: creditNoteInfo.docEntry,
+    creditNoteDocNum: creditNoteInfo.docNum,
+    creditNoteDocTotal: creditNoteInfo.docTotal,
+    creditNotePayload: creditNoteInfo.debug?.payload || null,
+    vendorPaymentDocEntry: vendorPaymentInfo.docEntry,
+    vendorPaymentDocNum: vendorPaymentInfo.docNum,
+    invoiceDocEntry: invoiceInfo.docEntry,
+    invoiceDocNum: invoiceInfo.docNum,
+    invoiceDocTotal: invoiceInfo.docTotal,
+    invoicePayload: invoiceInfo.debug?.payload || null,
+    creditAppliedToInvoice,
+    excessAmount,
+    payments: paymentInfos
+  };
+}
+
+function isMerchandiseExchangeTicket(ticket) {
+  return String(ticket.eventType || '').trim().toUpperCase() === 'VAB';
+}
+
+function splitMerchandiseExchangeTicket(ticket) {
+  const creditNoteLines = [];
+  const invoiceLines = [];
+
+  for (const line of ticket.lines || []) {
+    const quantity = Number(line.quantity);
+    const unitPrice = Number(line.unitPrice);
+    if (quantity < 0 || unitPrice < 0) {
+      creditNoteLines.push({
+        ...line,
+        quantity: Math.abs(quantity),
+        unitPrice: Math.abs(unitPrice)
+      });
+      continue;
+    }
+
+    if (quantity > 0 && unitPrice > 0) {
+      invoiceLines.push({
+        ...line,
+        quantity,
+        unitPrice
+      });
+    }
+  }
+
+  if (creditNoteLines.length === 0) {
+    throw new Error(`El ticket ${ticket.ticketKey} es VAB pero no tiene lineas negativas para nota credito.`);
+  }
+
+  if (invoiceLines.length === 0) {
+    throw new Error(`El ticket ${ticket.ticketKey} es VAB pero no tiene lineas positivas para factura.`);
+  }
+
+  return {
+    creditNoteTicket: {
+      ...ticket,
+      documentType: 'credit-note',
+      lines: creditNoteLines
+    },
+    invoiceTicket: {
+      ...ticket,
+      documentType: 'invoice',
+      lines: invoiceLines
+    }
+  };
+}
+
+function resolveDocumentTotal(documentInfo, ticket) {
+  const docTotal = Number(documentInfo.docTotal);
+  if (Number.isFinite(docTotal) && docTotal > 0) {
+    return roundMoney(docTotal);
+  }
+
+  return calculateExpectedInvoiceTotal(ticket);
+}
+
+function selectPaymentsForAmount(ticket, payments, expectedAmount) {
+  if (!Array.isArray(payments) || payments.length === 0) {
+    throw new Error(`El ticket ${ticket.ticketKey} requiere pago de excedente ${expectedAmount} y no tiene medios de pago asociados.`);
+  }
+
+  const selected = [];
+  let remaining = roundMoney(expectedAmount);
+
+  for (const payment of payments) {
+    if (remaining <= 0.1) break;
+
+    const paymentAmount = roundMoney(Number(payment.amount || 0));
+    if (!(paymentAmount > 0)) continue;
+
+    const amount = roundMoney(Math.min(paymentAmount, remaining));
+    selected.push({
+      ...payment,
+      amount
+    });
+    remaining = roundMoney(remaining - amount);
+  }
+
+  if (remaining > 0.1) {
+    throw new Error(`El ticket ${ticket.ticketKey} requiere excedente ${expectedAmount} y los medios de pago no cubren ${remaining}.`);
+  }
+
+  return selected;
 }
 
 function resolveSalesDocumentContext(ticket, mediosPago) {
